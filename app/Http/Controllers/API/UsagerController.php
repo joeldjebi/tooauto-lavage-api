@@ -145,7 +145,8 @@ class UsagerController extends Controller
 				"Voici vos identifiants de connexion :\n" .
 				"Numero de telephone : $mobileWithIndicatif\n" .
 				"Mot de passe : $rawPassword\n" .
-				"Code parrain : " . $parrain->code
+				"Code parrain : $parrain->code\n" .
+                "Lien de l'application : https://tooauto.com/link-app"
 			);
 
 			$this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
