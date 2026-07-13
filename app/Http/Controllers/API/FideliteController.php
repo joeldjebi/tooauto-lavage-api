@@ -7,6 +7,9 @@ use App\Models\Fidelite;
 use App\Models\Vehicule;
 use App\Models\User;
 use App\Models\Recompense;
+use App\Models\StationLavage;
+use App\Models\Lavage;
+use App\Models\AttributionVehicule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
@@ -280,6 +283,7 @@ class FideliteController extends Controller
 
             // Récupérer tous les usagers fidèles pour ce lavage
             $usagersFideles = Fidelite::with('usager')
+                                    ->whereHas('usager')
                                     ->where('lavage_id', $lavage->id)
                                     ->orderBy('cases_remplies', 'desc')
                                     ->orderBy('recompenses_gagnees', 'desc')
@@ -290,7 +294,12 @@ class FideliteController extends Controller
 
             $result = [];
             foreach ($groupedFidelites as $usagerId => $vehicules) {
-                $usager = $usagersFideles->firstWhere('usager_id', $usagerId)->usager;
+                $fideliteUsager = $usagersFideles->firstWhere('usager_id', $usagerId);
+                $usager = $fideliteUsager ? $fideliteUsager->usager : null;
+
+                if (!$usager) {
+                    continue;
+                }
 
                 $vehiculesData = [];
                 foreach ($vehicules as $matricule => $fidelite) {
@@ -1011,6 +1020,196 @@ class FideliteController extends Controller
     }
 
     /**
+     * Vérifier si une immatriculation scannée existe chez le lavage connecté
+     * et retourner les statistiques de lavage du véhicule.
+     */
+    public function verifierImmatriculationScannee(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'matricule' => 'required_without:immatriculation|string|max:50',
+                'immatriculation' => 'required_without:matricule|string|max:50'
+            ], [
+                'matricule.required_without' => 'Le matricule ou l\'immatriculation est obligatoire.',
+                'immatriculation.required_without' => 'Le matricule ou l\'immatriculation est obligatoire.'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation échouée.',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $lavage = auth('api')->user();
+            if (!$lavage) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Lavage non authentifié'
+                ], 401);
+            }
+
+            $matricule = trim($request->matricule ?? $request->immatriculation);
+            $vehicule = Vehicule::with(['marque', 'user'])
+                ->where('matricule', $matricule)
+                ->first();
+
+            if (!$vehicule) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Immatriculation non trouvée.',
+                    'existe' => false,
+                    'existe_chez_ce_lavage' => false,
+                    'matricule' => $matricule,
+                    'statistiques' => [
+                        'total_lavages' => 0,
+                        'lavages_en_cours' => 0,
+                        'lavages_termines' => 0,
+                        'lavages_annules' => 0,
+                        'total_recompenses' => 0,
+                        'recompenses_disponibles' => 0,
+                        'recompenses_utilisees' => 0
+                    ]
+                ], 200);
+            }
+
+            $stationLavage = StationLavage::where('created_by', $lavage->id)
+                ->orWhere('created_by', $lavage->created_by)
+                ->first();
+
+            $managerId = $stationLavage ? $stationLavage->created_by : ($lavage->created_by ?? $lavage->id);
+            $lavageIds = Lavage::where('created_by', $managerId)
+                ->pluck('id')
+                ->push($managerId)
+                ->push($lavage->id)
+                ->filter()
+                ->unique()
+                ->values();
+
+            $fidelites = Fidelite::where('matricule_vehicule', $vehicule->matricule)
+                ->where(function ($query) use ($stationLavage, $lavageIds) {
+                    if ($stationLavage) {
+                        $query->where('station_lavage_id', $stationLavage->id)
+                            ->orWhereIn('lavage_id', $lavageIds);
+                    } else {
+                        $query->whereIn('lavage_id', $lavageIds);
+                    }
+                })
+                ->get();
+
+            $recompenses = Recompense::where('matricule_vehicule', $vehicule->matricule)
+                ->whereIn('lavage_id', $lavageIds)
+                ->orderBy('date_attribution', 'desc')
+                ->get();
+
+            $attributionQuery = AttributionVehicule::with('laveur')
+                ->where('matricule_vehicule', $vehicule->matricule);
+
+            if ($stationLavage) {
+                $attributionQuery->where('station_lavage_id', $stationLavage->id);
+            } else {
+                $attributionQuery->whereIn('manager_id', $lavageIds);
+            }
+
+            $attributions = $attributionQuery
+                ->orderBy('date_attribution', 'desc')
+                ->get();
+
+            $vehiculeDansStation = $stationLavage
+                && $vehicule->user
+                && (int) $vehicule->user->station_de_lavage_id === (int) $stationLavage->id;
+
+            $existeChezCeLavage = $vehiculeDansStation
+                || $fidelites->isNotEmpty()
+                || $attributions->isNotEmpty();
+
+            $totalLavagesFidelite = $fidelites->sum(function ($fidelite) {
+                return ($fidelite->recompenses_gagnees * $fidelite->total_cases) + $fidelite->cases_remplies;
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => $existeChezCeLavage
+                    ? 'Immatriculation trouvée chez ce lavage.'
+                    : 'Immatriculation trouvée, mais aucune activité chez ce lavage.',
+                'existe' => true,
+                'existe_chez_ce_lavage' => $existeChezCeLavage,
+                'station_lavage' => $stationLavage ? [
+                    'id' => $stationLavage->id,
+                    'name' => $stationLavage->name
+                ] : null,
+                'vehicule' => [
+                    'matricule' => $vehicule->matricule,
+                    'marque' => $vehicule->marque->libelle ?? 'Non spécifiée',
+                    'modele' => $vehicule->modele ?? 'Non spécifié',
+                    'couleur' => $vehicule->couleur ?? null,
+                    'usager' => $vehicule->user ? [
+                        'id' => $vehicule->user->id,
+                        'nom' => $vehicule->user->nom,
+                        'prenoms' => $vehicule->user->prenoms,
+                        'telephone' => $vehicule->user->telephone_complet,
+                        'station_de_lavage_id' => $vehicule->user->station_de_lavage_id ?? null
+                    ] : null
+                ],
+                'statistiques' => [
+                    'total_lavages' => max($attributions->count(), $totalLavagesFidelite),
+                    'lavages_en_cours' => $attributions->where('statut', 'en_cours')->count(),
+                    'lavages_termines' => $attributions->where('statut', 'termine')->count(),
+                    'lavages_annules' => $attributions->where('statut', 'annule')->count(),
+                    'total_cases_fidelite' => $fidelites->sum('cases_remplies'),
+                    'total_recompenses' => $recompenses->count(),
+                    'recompenses_gagnees' => $fidelites->sum('recompenses_gagnees'),
+                    'recompenses_disponibles' => $recompenses->where('utilisee', false)->where('statut', 'attribuee')->count(),
+                    'recompenses_utilisees' => $recompenses->where('utilisee', true)->count(),
+                    'dernier_lavage' => optional($attributions->first())->date_attribution
+                ],
+                'fidelite' => [
+                    'total_cartes' => $fidelites->count(),
+                    'cartes' => $fidelites->map(function ($fidelite) {
+                        return [
+                            'id' => $fidelite->id,
+                            'matricule_vehicule' => $fidelite->matricule_vehicule,
+                            'cases_remplies' => $fidelite->cases_remplies,
+                            'total_cases' => $fidelite->total_cases,
+                            'cases_restantes' => $fidelite->getCasesRestantes(),
+                            'pourcentage' => $fidelite->getProgressionPourcentage(),
+                            'recompenses_gagnees' => $fidelite->recompenses_gagnees,
+                            'derniere_recompense' => $fidelite->derniere_recompense
+                        ];
+                    })->values()
+                ],
+                'historique_lavages' => $attributions->take(10)->map(function ($attribution) {
+                    return [
+                        'id' => $attribution->id,
+                        'laveur' => $attribution->laveur ? [
+                            'id' => $attribution->laveur->id,
+                            'nom_complet' => $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name
+                        ] : null,
+                        'type_lavage' => $attribution->type_lavage,
+                        'statut' => $attribution->statut,
+                        'date_attribution' => $attribution->date_attribution,
+                        'date_debut' => $attribution->date_debut,
+                        'date_fin' => $attribution->date_fin
+                    ];
+                })->values()
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de la vérification de l\'immatriculation scannée', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Une erreur est survenue lors de la vérification de l\'immatriculation.',
+                'detail' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Obtenir la liste des types de récompenses disponibles
      */
     public function getTypesRecompenses()
@@ -1176,6 +1375,7 @@ class FideliteController extends Controller
 
             // Top 5 des usagers les plus fidèles
             $topUsagers = Fidelite::with('usager')
+                                ->whereHas('usager')
                                 ->where('lavage_id', $lavage->id)
                                 ->select('usager_id', 'matricule_vehicule')
                                 ->selectRaw('SUM(recompenses_gagnees) as total_recompenses')
@@ -1195,7 +1395,9 @@ class FideliteController extends Controller
                     'total_cases_ajoutees' => $totalCasesAjoutees,
                     'moyenne_cases_par_vehicule' => $totalVehicules > 0 ? round($totalCasesAjoutees / $totalVehicules, 2) : 0
                 ],
-                'top_usagers' => $topUsagers->map(function ($fidelite) {
+                'top_usagers' => $topUsagers->filter(function ($fidelite) {
+                    return $fidelite->usager !== null;
+                })->map(function ($fidelite) {
                     return [
                         'usager' => [
                             'id' => $fidelite->usager->id,

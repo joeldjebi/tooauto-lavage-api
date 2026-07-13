@@ -59,6 +59,7 @@ Route::prefix('fidelite')->middleware('auth:api')->group(function () {
 // Routes pour la carte de fidélité (nouveau système)
 Route::prefix('carte-fidelite')->middleware('auth:api')->group(function () {
     Route::post('/add-case', [FideliteController::class, 'addCase']);
+    Route::post('/verifier-immatriculation', [FideliteController::class, 'verifierImmatriculationScannee']);
     Route::get('/carte/{usager_id}', [FideliteController::class, 'getCarteFidelite']);
     Route::get('/carte/{usager_id}/{matricule_vehicule}', [FideliteController::class, 'getCarteFidelite']);
     Route::get('/recompenses/{usager_id}', [FideliteController::class, 'getRecompenses']);
@@ -98,5 +99,6 @@ Route::prefix('attributions')->middleware('auth:api')->group(function () {
     Route::post('/attribuer-vehicule', [AuthController::class, 'attribuerVehicule']);
     Route::post('/terminer-lavage/{attributionId}', [AuthController::class, 'terminerLavage']);
     Route::get('/en-cours', [AuthController::class, 'getAttributionsEnCours']);
+    Route::get('/laveur/{laveurId}/vehicules', [AuthController::class, 'getVehiculesByLaveur']);
 	Route::get('/type-lavage', [StationLavageController::class, 'typeLavage']);
 });

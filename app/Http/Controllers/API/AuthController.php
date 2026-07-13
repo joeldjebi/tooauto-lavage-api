@@ -806,15 +806,24 @@ class AuthController extends Controller
             // Valider la requête
             $validator = Validator::make($request->all(), [
                 'matricule_vehicule' => 'required|string|exists:vehicules,matricule',
-                'laveur_id' => 'required|exists:lavages,id',
-                'type_lavage' => 'nullable|string|in:interieur,exterieur,complet,premium,simple',
+                'laveur_id' => 'required_without:laveur_ids|exists:lavages,id',
+                'laveur_ids' => 'required_without:laveur_id|array|min:1',
+                'laveur_ids.*' => 'integer|distinct|exists:lavages,id',
+                'type_lavage' => 'nullable|string|in:interieur,exterieur,complet,premium',
                 'notes' => 'nullable|string|max:500'
             ], [
                 'matricule_vehicule.required' => 'Le matricule du véhicule est obligatoire.',
                 'matricule_vehicule.exists' => 'Le véhicule avec ce matricule n\'existe pas.',
                 'laveur_id.required' => 'L\'ID du laveur est obligatoire.',
+                'laveur_id.required_without' => 'L\'ID du laveur est obligatoire si aucun tableau de laveurs n\'est fourni.',
                 'laveur_id.exists' => 'Le laveur sélectionné n\'existe pas.',
-                'type_lavage.in' => 'Le type de lavage doit être : interieur, exterieur, complet, simple ou premium.'
+                'laveur_ids.required_without' => 'Au moins un laveur est obligatoire.',
+                'laveur_ids.array' => 'La liste des laveurs doit être un tableau.',
+                'laveur_ids.min' => 'Au moins un laveur est obligatoire.',
+                'laveur_ids.*.integer' => 'Chaque laveur doit être identifié par un ID valide.',
+                'laveur_ids.*.distinct' => 'La liste des laveurs contient des doublons.',
+                'laveur_ids.*.exists' => 'Un des laveurs sélectionnés n\'existe pas.',
+                'type_lavage.in' => 'Le type de lavage doit être : interieur, exterieur, complet ou premium.'
             ]);
 
             if ($validator->fails()) {
@@ -833,17 +842,25 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // Vérifier que le laveur est bien un laveur actif
-            $laveur = Lavage::where('id', $request->laveur_id)
+            $laveurIds = $request->filled('laveur_ids')
+                ? collect($request->laveur_ids)->map(fn ($id) => (int) $id)->unique()->values()
+                : collect([(int) $request->laveur_id]);
+
+            // Vérifier que les laveurs sont bien des laveurs actifs du manager
+            $laveurs = Lavage::whereIn('id', $laveurIds)
                            ->where(['role' => 2, 'created_by' => $manager->id])
                            ->where('statut', 1)
-                           ->first();
+                           ->get()
+                           ->keyBy('id');
 
-            if (!$laveur) {
+            if ($laveurs->count() !== $laveurIds->count()) {
+                $laveursInvalides = $laveurIds->diff($laveurs->keys())->values();
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Laveur non trouvé ou inactif',
-                    'detail' => 'Le laveur sélectionné n\'existe pas ou n\'est pas actif.'
+                    'detail' => 'Un ou plusieurs laveurs sélectionnés n\'existent pas, ne sont pas actifs ou ne vous appartiennent pas.',
+                    'laveur_ids_invalides' => $laveursInvalides
                 ], 404);
             }
 
@@ -857,56 +874,68 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // Vérifier si le véhicule n'est pas déjà en cours de lavage
-            $attributionExistante = AttributionVehicule::where('matricule_vehicule', $request->matricule_vehicule)
+            // Vérifier si le véhicule est déjà attribué aux mêmes laveurs
+            $attributionsExistantes = AttributionVehicule::with('laveur')
+                                                      ->where('matricule_vehicule', $request->matricule_vehicule)
+                                                      ->whereIn('laveur_id', $laveurIds)
                                                       ->where('statut', 'en_cours')
-                                                      ->first();
+                                                      ->get();
 
-            if ($attributionExistante) {
+            if ($attributionsExistantes->isNotEmpty()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Véhicule déjà en cours de lavage',
-                    'detail' => 'Ce véhicule est déjà attribué au laveur ' . $attributionExistante->laveur->first_name . ' ' . $attributionExistante->laveur->last_name . '.',
-                    'attribution_existante' => [
-                        'laveur' => $attributionExistante->laveur->first_name . ' ' . $attributionExistante->laveur->last_name,
-                        'date_attribution' => $attributionExistante->created_at,
-                        'type_lavage' => $attributionExistante->type_lavage
-                    ]
+                    'message' => 'Véhicule déjà attribué à un ou plusieurs laveurs sélectionnés',
+                    'detail' => 'Ce véhicule est déjà en cours de lavage pour un ou plusieurs laveurs sélectionnés.',
+                    'attributions_existantes' => $attributionsExistantes->map(function ($attribution) {
+                        return [
+                            'laveur_id' => $attribution->laveur_id,
+                            'laveur' => $attribution->laveur
+                                ? $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name
+                                : 'Laveur non trouvé',
+                            'date_attribution' => $attribution->created_at,
+                            'type_lavage' => $attribution->type_lavage
+                        ];
+                    })->values()
                 ], 422);
             }
 
             DB::beginTransaction();
             try {
-                // Créer l'attribution
-                $attribution = AttributionVehicule::create([
-                    'matricule_vehicule' => $vehicule->matricule,
-                    'laveur_id' => $laveur->id,
-                    'manager_id' => $manager->id,
-                    'type_lavage' => $request->type_lavage ?? 'complet',
-                    'notes' => $request->notes,
-                    'statut' => 'en_cours',
-                    'date_attribution' => now(),
-                    'date_debut' => now(),
-                    'station_lavage_id' => $stationLavage->id
-                ]);
+                $now = now();
+                $attributions = collect();
+
+                foreach ($laveurIds as $laveurId) {
+                    $laveur = $laveurs->get($laveurId);
+
+                    $attributions->push(AttributionVehicule::create([
+                        'matricule_vehicule' => $vehicule->matricule,
+                        'laveur_id' => $laveur->id,
+                        'manager_id' => $manager->id,
+                        'type_lavage' => $request->type_lavage ?? 'complet',
+                        'notes' => $request->notes,
+                        'statut' => 'en_cours',
+                        'date_attribution' => $now,
+                        'date_debut' => $now,
+                        'station_lavage_id' => $stationLavage->id
+                    ]));
+                }
 
                 // Log de l'action
-                \Log::info('Véhicule attribué à un laveur', [
+                \Log::info('Véhicule attribué à un ou plusieurs laveurs', [
                     'manager_id' => $manager->id,
                     'manager_name' => $manager->first_name . ' ' . $manager->last_name,
-                    'laveur_id' => $laveur->id,
-                    'laveur_name' => $laveur->first_name . ' ' . $laveur->last_name,
+                    'laveur_ids' => $laveurIds,
                     'matricule_vehicule' => $vehicule->matricule,
-                    'type_lavage' => $attribution->type_lavage,
-                    'attribution_id' => $attribution->id
+                    'type_lavage' => $request->type_lavage ?? 'complet',
+                    'attribution_ids' => $attributions->pluck('id')
                 ]);
 
                 DB::commit();
 
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Véhicule attribué avec succès',
-                    'attribution' => [
+                $formattedAttributions = $attributions->map(function ($attribution) use ($vehicule, $laveurs, $manager) {
+                    $laveur = $laveurs->get($attribution->laveur_id);
+
+                    return [
                         'id' => $attribution->id,
                         'matricule_vehicule' => $vehicule->matricule,
                         'vehicule' => [
@@ -927,7 +956,17 @@ class AuthController extends Controller
                         'statut' => $attribution->statut,
                         'date_attribution' => $attribution->date_attribution,
                         'date_debut' => $attribution->date_debut
-                    ]
+                    ];
+                })->values();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => $formattedAttributions->count() > 1
+                        ? 'Véhicule attribué avec succès aux laveurs'
+                        : 'Véhicule attribué avec succès',
+                    'total_attributions' => $formattedAttributions->count(),
+                    'attribution' => $formattedAttributions->first(),
+                    'attributions' => $formattedAttributions
                 ], 201);
 
             } catch (\Exception $e) {
@@ -1165,6 +1204,145 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Une erreur est survenue lors de la récupération des attributions.',
+                'detail' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtenir la liste des véhicules attribués à un laveur
+     */
+    public function getVehiculesByLaveur(Request $request, $laveurId)
+    {
+        try {
+            $currentUser = Auth::guard('api')->user();
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Utilisateur non authentifié.'
+                ], 401);
+            }
+
+            $validator = Validator::make(
+                array_merge($request->all(), ['laveur_id' => $laveurId]),
+                [
+                    'laveur_id' => 'required|integer|exists:lavages,id',
+                    'statut' => 'nullable|string|in:en_cours,termine,annule,tous'
+                ],
+                [
+                    'laveur_id.required' => 'L\'ID du laveur est obligatoire.',
+                    'laveur_id.integer' => 'L\'ID du laveur doit être un nombre entier.',
+                    'laveur_id.exists' => 'Le laveur sélectionné n\'existe pas.',
+                    'statut.in' => 'Le statut doit être : en_cours, termine, annule ou tous.'
+                ]
+            );
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation échouée.',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $laveur = Lavage::where('id', $laveurId)
+                ->where('role', 2)
+                ->first();
+
+            if (!$laveur) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Laveur non trouvé',
+                    'detail' => 'Aucun laveur trouvé avec l\'ID ' . $laveurId . '.'
+                ], 404);
+            }
+
+            if ($currentUser->role == 1) {
+                if ($laveur->created_by != $currentUser->id) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Accès non autorisé.',
+                        'detail' => 'Ce laveur ne vous appartient pas.'
+                    ], 403);
+                }
+            } elseif ($currentUser->role == 2) {
+                if ((int) $currentUser->id !== (int) $laveur->id) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Accès non autorisé.',
+                        'detail' => 'Vous ne pouvez consulter que vos propres véhicules.'
+                    ], 403);
+                }
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé.'
+                ], 403);
+            }
+
+            $statut = $request->get('statut', 'en_cours');
+
+            $query = AttributionVehicule::with(['vehicule.marque', 'vehicule.user'])
+                ->where('laveur_id', $laveur->id)
+                ->orderBy('date_attribution', 'desc');
+
+            if ($statut !== 'tous') {
+                $query->where('statut', $statut);
+            }
+
+            $attributions = $query->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Liste des véhicules du laveur récupérée avec succès',
+                'laveur' => [
+                    'id' => $laveur->id,
+                    'nom_complet' => $laveur->first_name . ' ' . $laveur->last_name,
+                    'mobile' => $laveur->mobile
+                ],
+                'statut_filtre' => $statut,
+                'total_vehicules' => $attributions->count(),
+                'vehicules' => $attributions->map(function ($attribution) {
+                    $vehicule = $attribution->vehicule;
+
+                    return [
+                        'attribution_id' => $attribution->id,
+                        'matricule_vehicule' => $attribution->matricule_vehicule,
+                        'vehicule' => [
+                            'matricule' => $vehicule->matricule ?? $attribution->matricule_vehicule,
+                            'marque' => $vehicule && $vehicule->marque ? $vehicule->marque->libelle : 'Non spécifiée',
+                            'modele' => $vehicule->modele ?? 'Non spécifié',
+                            'couleur' => $vehicule->couleur ?? null,
+                            'proprietaire' => $vehicule && $vehicule->user ? [
+                                'id' => $vehicule->user->id,
+                                'nom' => $vehicule->user->nom,
+                                'prenoms' => $vehicule->user->prenoms,
+                                'mobile' => $vehicule->user->mobile
+                            ] : null
+                        ],
+                        'type_lavage' => $attribution->type_lavage,
+                        'notes' => $attribution->notes,
+                        'statut' => $attribution->statut,
+                        'date_attribution' => $attribution->date_attribution,
+                        'date_debut' => $attribution->date_debut,
+                        'date_fin' => $attribution->date_fin,
+                        'duree_ecoulee' => $attribution->date_debut
+                            ? $attribution->date_debut->diffInMinutes($attribution->date_fin ?? now()) . ' minutes'
+                            : null
+                    ];
+                })->values()
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur lors de la récupération des véhicules du laveur', [
+                'laveur_id' => $laveurId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Une erreur est survenue lors de la récupération des véhicules du laveur.',
                 'detail' => $e->getMessage()
             ], 500);
         }
