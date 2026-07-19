@@ -40,21 +40,22 @@ class UsagerController extends Controller
 
 	public function registerUsager(Request $request)
 	{
+		// Validation des données d'entrée
 		$validator = Validator::make($request->all(), [
 			'indicatif' => 'required|string',
 			'nom' => 'required|string',
 			'prenoms' => 'required|string',
-			'mobile' => 'required|numeric|unique:users,mobile',
+			'mobile' => 'required|numeric|unique:users',
 			'is_whatsapp' => 'required|numeric',
-			'matricule' => 'required|string|max:50|unique:vehicules,matricule',
-			'carte_grise' => 'required|string|max:255|unique:vehicules,carte_grise',
-			'photos' => 'required|array|size:4',
-			'photos.*' => 'image|mimes:jpeg,png,jpg,gif|max:8048',
-			'type_de_vehicule_id' => 'required|integer|exists:type_de_vehicules,id',
-			'marque_id' => 'required|integer|exists:marques,id',
-			'type_de_carburant_id' => 'required|integer|exists:type_de_carburants,id',
-			'couleur' => 'required|string|max:100',
-			'modele' => 'required|string|max:255',
+			'immatriculation' => 'nullable|string|unique:vehicules,matricule',
+			'carte_grise' => 'nullable|string|unique:vehicules,carte_grise',
+			'photos' => 'nullable|array|size:4',
+			'photos.*' => 'file|image|max:25048',
+			'type_de_vehicule_id' => 'nullable|exists:type_de_vehicules,id',
+			'marque_id' => 'nullable|exists:marques,id',
+			'type_de_carburant_id' => 'nullable|exists:type_de_carburants,id',
+			'couleur' => 'nullable|string|max:50',
+			'modele' => 'nullable|string',
 		]);
 
 		if ($validator->fails()) {
@@ -65,101 +66,85 @@ class UsagerController extends Controller
 			], 422);
 		}
 
+		// Utilisation d'une transaction pour garantir l'intégrité des données
 		DB::beginTransaction();
-
 		try {
+
 			$rawPassword = strval(random_int(100000, 999999));
-			$lavage = auth('api')->user();
 
-			if (!$lavage) {
-				return response()->json([
-					'status' => 'error',
-					'message' => 'lavage non authentifiée'
-				], 401);
-			}
+			$commercial = auth()->user();
 
-			$stationDeLavage = StationLavage::where('created_by', $lavage->id)
-				->orWhere('created_by', $lavage->created_by)
-				->first();
-
-			if (!$stationDeLavage) {
-				return response()->json([
-					'status' => 'error',
-					'message' => 'Station de lavage non trouvé.'
-				], 404);
-			}
-
-			$parrain = Parrain::where('station_de_lavage_id', $stationDeLavage->id)->first();
-			if (!$parrain) {
-				return response()->json([
-					'status' => 'error',
-					'message' => 'Aucun code parrain trouvé pour cette station.'
-				], 422);
-			}
-
+			// Création de l'utilisateur
 			$user = new User();
 			$user->uuid = (string) Str::uuid();
 			$user->indicatif = $request->indicatif;
 			$user->mobile = $request->mobile;
 			$user->nom = $request->nom;
 			$user->prenoms = $request->prenoms;
-			$user->password = bcrypt($rawPassword);
+			$user->password = bcrypt($rawPassword); // Hash sécurisé du mot de passe
 			$user->is_whatsapp = $request->is_whatsapp;
-			$user->lavage_id = $lavage->id;
-			$user->station_de_lavage_id = $stationDeLavage->id;
-			$user->parrain_id = $parrain->id;
+			$user->commercial_id = $commercial->id;
+
 			$user->save();
 
-			$photoPaths = [];
-			foreach ($request->file('photos', []) as $photo) {
-				$photoPaths[] = $this->wasabiService->uploadFile(
-					$photo,
-					'vehicules/photos',
-					'vehicule'
-				);
+			$vehicule = null;
+
+			if ($request->filled('immatriculation')) {
+				$vehicule = new Vehicule();
+				$vehicule->matricule = $request->immatriculation;
+				$vehicule->carte_grise = $request->carte_grise;
+				$vehicule->type_de_vehicule_id = $request->type_de_vehicule_id;
+				$vehicule->marque_id = $request->marque_id;
+				$vehicule->type_de_carburant_id = $request->type_de_carburant_id;
+				$vehicule->couleur = $request->couleur;
+				$vehicule->modele = $request->modele;
+				$vehicule->user_id = $user->id;
+				$vehicule->created_by = $commercial->id;
+				$vehicule->provenance = "commerciaux";
+
+				if ($request->hasFile('photos')) {
+					$photosPaths = [];
+
+					foreach ($request->file('photos') as $photo) {
+						$photosPaths[] = $this->wasabiService->uploadFile(
+							$photo,
+							'vehicules/photos',
+							'vehicule'
+						);
+					}
+
+					$vehicule->photos = json_encode($photosPaths);
+				}
+
+				$vehicule->save();
 			}
 
-			$vehicule = new Vehicule();
-			$vehicule->matricule = $request->matricule;
-			$vehicule->carte_grise = $request->carte_grise;
-			$vehicule->photos = $photoPaths;
-			$vehicule->user_id = $user->id;
-			$vehicule->type_de_vehicule_id = $request->type_de_vehicule_id;
-			$vehicule->marque_id = $request->marque_id;
-			$vehicule->type_de_carburant_id = $request->type_de_carburant_id;
-			$vehicule->couleur = $request->couleur;
-			$vehicule->modele = $request->modele;
-			$vehicule->statut = 1;
-			$vehicule->save();
-
-			ReferralCode::create([
-				'user_id' => $user->id,
-				'code' => $parrain->code
-			]);
-
+			// Commit de la transaction
 			DB::commit();
 
 			$mobileWithIndicatif = $request->indicatif . $request->mobile;
+			$password = $rawPassword;
+
+			// Construire le message
 			$message = strtoupper(
 				"Votre compte a ete cree avec succes\n" .
 				"Voici vos identifiants de connexion :\n" .
 				"Numero de telephone : $mobileWithIndicatif\n" .
-				"Mot de passe : $rawPassword\n" .
-				"Code parrain : $parrain->code\n" .
-                "Telecharger Tooauto  : https://tooauto.com/link-app"
+				"Mot de passe : $password"
 			);
 
-			$this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
+			// Envoyer le SMS
+			$smsResponse = $this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
 
 			return response()->json([
 				'success' => true,
 				'message' => 'Utilisateur enregistré avec succès.',
 				'user' => $user,
-				'vehicule' => $this->attachVehiculePhotoUrls($vehicule),
-				'parrain' => $parrain
-			], 201);
+				'vehicule' => $vehicule ? $this->attachVehiculePhotoUrls($vehicule) : null,
+			], 201); // Utilisation du code HTTP 201 pour "Created"
 
 		} catch (\Exception $e) {
+			// Rollback de la transaction en cas d'erreur
 			DB::rollBack();
 
 			return response()->json([

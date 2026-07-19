@@ -11,4 +11,20 @@ class Type_lavage extends Model
 
 	protected $table = 'type_lavages';
 
+    protected $fillable = [
+        'libelle',
+        'montant',
+        'lavage_id',
+    ];
+
+    protected $casts = [
+        'montant' => 'decimal:2',
+        'lavage_id' => 'integer',
+    ];
+
+    public function lavage()
+    {
+        return $this->belongsTo(Lavage::class, 'lavage_id');
+    }
+
 }

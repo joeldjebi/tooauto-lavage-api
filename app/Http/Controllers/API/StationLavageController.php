@@ -41,8 +41,59 @@ class StationLavageController extends Controller
 
 	public function typeLavage()
     {
-        $typeLavage = Type_lavage::all();
+        $lavage = auth('api')->user();
+
+        if (!$lavage) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lavage non authentifié'
+            ], 401);
+        }
+
+        $lavageId = $lavage->created_by ?: $lavage->id;
+
+        $typeLavage = Type_lavage::where('lavage_id', $lavageId)->get();
+
         return response()->json($typeLavage);
+    }
+
+    public function storeTypeLavage(Request $request)
+    {
+        $lavage = auth('api')->user();
+
+        if (!$lavage) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lavage non authentifié'
+            ], 401);
+        }
+
+        $lavageId = $lavage->created_by ?: $lavage->id;
+
+        $validator = Validator::make($request->all(), [
+            'libelle' => 'required|string|max:200|unique:type_lavages,libelle,NULL,id,lavage_id,' . $lavageId,
+            'montant' => 'required|numeric|min:0',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation échouée.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $typeLavage = Type_lavage::create([
+            'libelle' => $request->libelle,
+            'montant' => $request->montant,
+            'lavage_id' => $lavageId,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Type de lavage créé avec succès.',
+            'data' => $typeLavage,
+        ], 201);
     }
 
 	public function typeVehicule()
