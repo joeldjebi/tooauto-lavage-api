@@ -17,8 +17,10 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 use App\Models\User;
 use App\Models\Type_lavage;
+use App\Models\AttributionVehicule;
 use App\Models\ReferralCode;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use App\Services\WasabiService;
 
 class StationLavageController extends Controller
@@ -41,34 +43,32 @@ class StationLavageController extends Controller
 
 	public function typeLavage()
     {
-        $lavage = auth('api')->user();
+        [$lavage, $lavageId] = $this->getAuthenticatedLavageContext();
 
-        if (!$lavage) {
+        if (!$lavageId) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Lavage non authentifié'
             ], 401);
         }
 
-        $lavageId = $lavage->created_by ?: $lavage->id;
-
-        $typeLavage = Type_lavage::where('lavage_id', $lavageId)->get();
+        $typeLavage = Type_lavage::where('lavage_id', $lavageId)
+            ->orderBy('libelle')
+            ->get();
 
         return response()->json($typeLavage);
     }
 
     public function storeTypeLavage(Request $request)
     {
-        $lavage = auth('api')->user();
+        [$lavage, $lavageId] = $this->getAuthenticatedLavageContext();
 
-        if (!$lavage) {
+        if (!$lavageId) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Lavage non authentifié'
             ], 401);
         }
-
-        $lavageId = $lavage->created_by ?: $lavage->id;
 
         $validator = Validator::make($request->all(), [
             'libelle' => 'required|string|max:200|unique:type_lavages,libelle,NULL,id,lavage_id,' . $lavageId,
@@ -94,6 +94,259 @@ class StationLavageController extends Controller
             'message' => 'Type de lavage créé avec succès.',
             'data' => $typeLavage,
         ], 201);
+    }
+
+    public function showTypeLavage($id)
+    {
+        [$lavage, $lavageId] = $this->getAuthenticatedLavageContext();
+
+        if (!$lavageId) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lavage non authentifié'
+            ], 401);
+        }
+
+        $typeLavage = Type_lavage::where('lavage_id', $lavageId)->find($id);
+
+        if (!$typeLavage) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Type de lavage non trouvé.'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $typeLavage,
+        ]);
+    }
+
+    public function updateTypeLavage(Request $request, $id)
+    {
+        [$lavage, $lavageId] = $this->getAuthenticatedLavageContext();
+
+        if (!$lavageId) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lavage non authentifié'
+            ], 401);
+        }
+
+        $typeLavage = Type_lavage::where('lavage_id', $lavageId)->find($id);
+
+        if (!$typeLavage) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Type de lavage non trouvé.'
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'libelle' => [
+                'sometimes',
+                'required',
+                'string',
+                'max:200',
+                Rule::unique('type_lavages', 'libelle')
+                    ->where(fn ($query) => $query->where('lavage_id', $lavageId))
+                    ->ignore($typeLavage->id),
+            ],
+            'montant' => 'sometimes|required|numeric|min:0',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation échouée.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $typeLavage->update($request->only(['libelle', 'montant']));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Type de lavage mis à jour avec succès.',
+            'data' => $typeLavage->fresh(),
+        ]);
+    }
+
+    public function destroyTypeLavage($id)
+    {
+        [$lavage, $lavageId] = $this->getAuthenticatedLavageContext();
+
+        if (!$lavageId) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lavage non authentifié'
+            ], 401);
+        }
+
+        $typeLavage = Type_lavage::where('lavage_id', $lavageId)->find($id);
+
+        if (!$typeLavage) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Type de lavage non trouvé.'
+            ], 404);
+        }
+
+        $isUsed = AttributionVehicule::where('type_lavage_id', $typeLavage->id)->exists();
+
+        if ($isUsed) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ce type de lavage est déjà utilisé par une attribution.'
+            ], 422);
+        }
+
+        $typeLavage->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Type de lavage supprimé avec succès.',
+        ]);
+    }
+
+    public function statsLavageStation(Request $request)
+    {
+        [$lavage, $lavageId] = $this->getAuthenticatedLavageContext();
+
+        if (!$lavageId) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lavage non authentifié'
+            ], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'date_debut' => 'nullable|date',
+            'date_fin' => 'nullable|date',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation échouée.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        if ($request->filled('date_debut') && $request->filled('date_fin')) {
+            $dateDebut = \Carbon\Carbon::parse($request->date_debut);
+            $dateFin = \Carbon\Carbon::parse($request->date_fin);
+
+            if ($dateFin->lt($dateDebut)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation échouée.',
+                    'errors' => [
+                        'date_fin' => ['La date de fin doit être supérieure ou égale à la date de début.'],
+                    ],
+                ], 422);
+            }
+        }
+
+        $stationLavage = StationLavage::where('created_by', $lavageId)->first();
+
+        if (!$stationLavage) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Station de lavage non trouvée.'
+            ], 404);
+        }
+
+        $query = AttributionVehicule::with(['typeLavage', 'laveur'])
+            ->where('station_lavage_id', $stationLavage->id);
+
+        if ($request->filled('date_debut')) {
+            $query->where('date_attribution', '>=', \Carbon\Carbon::parse($request->date_debut)->startOfDay());
+        }
+
+        if ($request->filled('date_fin')) {
+            $query->where('date_attribution', '<=', \Carbon\Carbon::parse($request->date_fin)->endOfDay());
+        }
+
+        $attributions = $query->orderBy('date_attribution', 'desc')->get();
+        $termines = $attributions->where('statut', 'termine');
+        $now = now();
+
+        $revenuRealise = $termines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0));
+        $revenuPotentiel = $attributions->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0));
+        $durees = $termines->filter(fn ($attribution) => $attribution->date_debut && $attribution->date_fin)
+            ->map(fn ($attribution) => $attribution->date_debut->diffInMinutes($attribution->date_fin));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Statistiques de lavage récupérées avec succès.',
+            'station' => [
+                'id' => $stationLavage->id,
+                'name' => $stationLavage->name,
+            ],
+            'periode' => [
+                'date_debut' => $request->date_debut,
+                'date_fin' => $request->date_fin,
+            ],
+            'global' => [
+                'total_lavages' => $attributions->count(),
+                'vehicules_uniques' => $attributions->pluck('matricule_vehicule')->unique()->count(),
+                'lavages_en_cours' => $attributions->where('statut', 'en_cours')->count(),
+                'lavages_termines' => $termines->count(),
+                'lavages_annules' => $attributions->where('statut', 'annule')->count(),
+                'revenu_realise' => $revenuRealise,
+                'revenu_potentiel' => $revenuPotentiel,
+                'duree_moyenne_minutes' => $durees->isNotEmpty() ? round($durees->avg(), 2) : 0,
+            ],
+            'periodes' => [
+                'aujourdhui' => $attributions->filter(fn ($attribution) => $attribution->date_attribution?->isSameDay($now))->count(),
+                'cette_semaine' => $attributions->filter(fn ($attribution) => $attribution->date_attribution && $attribution->date_attribution->between($now->copy()->startOfWeek(), $now->copy()->endOfWeek()))->count(),
+                'ce_mois' => $attributions->filter(fn ($attribution) => $attribution->date_attribution?->isSameMonth($now))->count(),
+            ],
+            'par_type_lavage' => $attributions->groupBy('type_lavage_id')->map(function ($items, $typeLavageId) {
+                $typeLavage = $items->first()->typeLavage;
+                $itemsTermines = $items->where('statut', 'termine');
+
+                return [
+                    'type_lavage_id' => $typeLavageId ? (int) $typeLavageId : null,
+                    'libelle' => $typeLavage?->libelle,
+                    'montant' => $typeLavage?->montant,
+                    'total_lavages' => $items->count(),
+                    'lavages_en_cours' => $items->where('statut', 'en_cours')->count(),
+                    'lavages_termines' => $itemsTermines->count(),
+                    'lavages_annules' => $items->where('statut', 'annule')->count(),
+                    'revenu_realise' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                ];
+            })->values(),
+            'par_laveur' => $attributions->groupBy('laveur_id')->map(function ($items, $laveurId) {
+                $laveur = $items->first()->laveur;
+                $itemsTermines = $items->where('statut', 'termine');
+
+                return [
+                    'laveur_id' => $laveurId ? (int) $laveurId : null,
+                    'nom_complet' => $laveur ? $laveur->first_name . ' ' . $laveur->last_name : null,
+                    'total_lavages' => $items->count(),
+                    'lavages_en_cours' => $items->where('statut', 'en_cours')->count(),
+                    'lavages_termines' => $itemsTermines->count(),
+                    'lavages_annules' => $items->where('statut', 'annule')->count(),
+                    'revenu_realise' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                ];
+            })->values(),
+            'dernieres_attributions' => $attributions->take(10)->map(function ($attribution) {
+                return [
+                    'id' => $attribution->id,
+                    'matricule_vehicule' => $attribution->matricule_vehicule,
+                    'laveur' => $attribution->laveur ? $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name : null,
+                    'type_lavage_id' => $attribution->type_lavage_id,
+                    'libelle' => $attribution->typeLavage?->libelle,
+                    'montant' => $attribution->typeLavage?->montant,
+                    'statut' => $attribution->statut,
+                    'date_attribution' => $attribution->date_attribution,
+                    'date_debut' => $attribution->date_debut,
+                    'date_fin' => $attribution->date_fin,
+                ];
+            })->values(),
+        ]);
     }
 
 	public function typeVehicule()
@@ -651,6 +904,17 @@ class StationLavageController extends Controller
             : null;
 
         return $station;
+    }
+
+    protected function getAuthenticatedLavageContext(): array
+    {
+        $lavage = auth('api')->user();
+
+        if (!$lavage) {
+            return [null, null];
+        }
+
+        return [$lavage, $lavage->created_by ?: $lavage->id];
     }
 
     protected function normalizeStationLavageLogoPath($value)

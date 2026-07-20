@@ -100,6 +100,10 @@ Route::prefix('attributions')->middleware('auth:api')->group(function () {
     Route::post('/terminer-lavage/{attributionId}', [AuthController::class, 'terminerLavage']);
     Route::get('/en-cours', [AuthController::class, 'getAttributionsEnCours']);
     Route::get('/laveur/{laveurId}/vehicules', [AuthController::class, 'getVehiculesByLaveur']);
+    Route::get('/stats-station', [StationLavageController::class, 'statsLavageStation']);
     Route::post('/type-lavage', [StationLavageController::class, 'storeTypeLavage']);
 	Route::get('/type-lavage', [StationLavageController::class, 'typeLavage']);
+    Route::get('/type-lavage/{id}', [StationLavageController::class, 'showTypeLavage'])->whereNumber('id');
+    Route::put('/type-lavage/{id}', [StationLavageController::class, 'updateTypeLavage'])->whereNumber('id');
+    Route::delete('/type-lavage/{id}', [StationLavageController::class, 'destroyTypeLavage'])->whereNumber('id');
 });
