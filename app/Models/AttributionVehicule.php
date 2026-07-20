@@ -44,6 +44,15 @@ class AttributionVehicule extends Model
     }
 
     /**
+     * Relation avec les laveurs assignés au même lavage.
+     */
+    public function laveurs()
+    {
+        return $this->belongsToMany(Lavage::class, 'attribution_vehicule_laveur', 'attribution_vehicule_id', 'laveur_id')
+            ->withTimestamps();
+    }
+
+    /**
      * Relation avec le manager
      */
     public function manager()

@@ -73,4 +73,15 @@ class Lavage extends Authenticatable implements JWTSubject
     {
         return $query->where('role', $role);
     }
+
+    public function attributions()
+    {
+        return $this->hasMany(AttributionVehicule::class, 'laveur_id');
+    }
+
+    public function attributionsAssignees()
+    {
+        return $this->belongsToMany(AttributionVehicule::class, 'attribution_vehicule_laveur', 'laveur_id', 'attribution_vehicule_id')
+            ->withTimestamps();
+    }
 }

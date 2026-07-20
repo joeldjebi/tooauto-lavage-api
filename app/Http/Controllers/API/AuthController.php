@@ -843,7 +843,9 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            $hasAttributions = AttributionVehicule::where('laveur_id', $laveur->id)->exists();
+            $hasAttributions = AttributionVehicule::where('laveur_id', $laveur->id)
+                ->orWhereHas('laveurs', fn ($query) => $query->where('lavages.id', $laveur->id))
+                ->exists();
 
             if ($hasAttributions) {
                 return response()->json([
@@ -949,8 +951,11 @@ class AuthController extends Controller
                 ], 403);
             }
 
-            $query = AttributionVehicule::with(['typeLavage', 'vehicule.marque', 'vehicule.user'])
-                ->where('laveur_id', $laveur->id);
+            $query = AttributionVehicule::with(['typeLavage', 'vehicule.marque', 'vehicule.user', 'laveurs'])
+                ->where(function ($query) use ($laveur) {
+                    $query->where('laveur_id', $laveur->id)
+                        ->orWhereHas('laveurs', fn ($subQuery) => $subQuery->where('lavages.id', $laveur->id));
+                });
 
             if ($request->filled('date_debut')) {
                 $query->where('date_attribution', '>=', \Carbon\Carbon::parse($request->date_debut)->startOfDay());
@@ -1014,6 +1019,7 @@ class AuthController extends Controller
                             'marque' => $vehicule && $vehicule->marque ? $vehicule->marque->libelle : null,
                             'modele' => $vehicule->modele ?? null,
                         ],
+                        'laveurs' => $attribution->laveurs->map(fn ($laveur) => $this->formatLaveurSummary($laveur))->values(),
                         ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
                         'statut' => $attribution->statut,
                         'date_attribution' => $attribution->date_attribution,
@@ -1184,10 +1190,9 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // Vérifier si le véhicule est déjà attribué aux mêmes laveurs
-            $attributionsExistantes = AttributionVehicule::with(['laveur', 'typeLavage'])
+            // Vérifier si le véhicule a déjà un lavage en cours.
+            $attributionsExistantes = AttributionVehicule::with(['laveurs', 'typeLavage'])
                                                       ->where('matricule_vehicule', $request->matricule_vehicule)
-                                                      ->whereIn('laveur_id', $laveurIds)
                                                       ->where('statut', 'en_cours')
                                                       ->get();
 
@@ -1195,13 +1200,11 @@ class AuthController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Véhicule déjà attribué à un ou plusieurs laveurs sélectionnés',
-                    'detail' => 'Ce véhicule est déjà en cours de lavage pour un ou plusieurs laveurs sélectionnés.',
+                    'detail' => 'Ce véhicule est déjà en cours de lavage.',
                     'attributions_existantes' => $attributionsExistantes->map(function ($attribution) {
                         return [
-                            'laveur_id' => $attribution->laveur_id,
-                            'laveur' => $attribution->laveur
-                                ? $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name
-                                : 'Laveur non trouvé',
+                            'id' => $attribution->id,
+                            'laveurs' => $attribution->laveurs->map(fn ($laveur) => $this->formatLaveurSummary($laveur))->values(),
                             'date_attribution' => $attribution->created_at,
                             ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id)
                         ];
@@ -1212,71 +1215,63 @@ class AuthController extends Controller
             DB::beginTransaction();
             try {
                 $now = now();
-                $attributions = collect();
+                $primaryLaveur = $laveurs->get($laveurIds->first());
 
-                foreach ($laveurIds as $laveurId) {
-                    $laveur = $laveurs->get($laveurId);
+                $attribution = AttributionVehicule::create([
+                    'matricule_vehicule' => $vehicule->matricule,
+                    'laveur_id' => $primaryLaveur->id,
+                    'manager_id' => $manager->id,
+                    'type_lavage_id' => $typeLavage->id,
+                    'notes' => $request->notes,
+                    'statut' => 'en_cours',
+                    'date_attribution' => $now,
+                    'date_debut' => $now,
+                    'station_lavage_id' => $stationLavage->id
+                ]);
 
-                    $attributions->push(AttributionVehicule::create([
-                        'matricule_vehicule' => $vehicule->matricule,
-                        'laveur_id' => $laveur->id,
-                        'manager_id' => $manager->id,
-                        'type_lavage_id' => $typeLavage->id,
-                        'notes' => $request->notes,
-                        'statut' => 'en_cours',
-                        'date_attribution' => $now,
-                        'date_debut' => $now,
-                        'station_lavage_id' => $stationLavage->id
-                    ]));
-                }
+                $attribution->laveurs()->sync($laveurIds->all());
+                $attribution->load('laveurs', 'typeLavage');
 
                 // Log de l'action
-                \Log::info('Véhicule attribué à un ou plusieurs laveurs', [
+                \Log::info('Véhicule attribué à un lavage avec un ou plusieurs laveurs', [
                     'manager_id' => $manager->id,
                     'manager_name' => $manager->first_name . ' ' . $manager->last_name,
                     'laveur_ids' => $laveurIds,
                     'matricule_vehicule' => $vehicule->matricule,
                     'type_lavage_id' => $typeLavage->id,
-                    'attribution_ids' => $attributions->pluck('id')
+                    'attribution_id' => $attribution->id
                 ]);
 
                 DB::commit();
 
-                $formattedAttributions = $attributions->map(function ($attribution) use ($vehicule, $laveurs, $manager, $typeLavage) {
-                    $laveur = $laveurs->get($attribution->laveur_id);
-
-                    return [
-                        'id' => $attribution->id,
-                        'matricule_vehicule' => $vehicule->matricule,
-                        'vehicule' => [
-                            'marque' => $vehicule->marque->libelle ?? 'Non spécifiée',
-                            'modele' => $vehicule->modele ?? 'Non spécifié'
-                        ],
-                        'laveur' => [
-                            'id' => $laveur->id,
-                            'nom_complet' => $laveur->first_name . ' ' . $laveur->last_name,
-                            'mobile' => $laveur->mobile
-                        ],
-                        'manager' => [
-                            'id' => $manager->id,
-                            'nom_complet' => $manager->first_name . ' ' . $manager->last_name
-                        ],
-                        ...$this->formatTypeLavageFields($typeLavage, $attribution->type_lavage_id),
-                        'notes' => $attribution->notes,
-                        'statut' => $attribution->statut,
-                        'date_attribution' => $attribution->date_attribution,
-                        'date_debut' => $attribution->date_debut
-                    ];
-                })->values();
+                $formattedAttribution = [
+                    'id' => $attribution->id,
+                    'matricule_vehicule' => $vehicule->matricule,
+                    'vehicule' => [
+                        'marque' => $vehicule->marque->libelle ?? 'Non spécifiée',
+                        'modele' => $vehicule->modele ?? 'Non spécifié'
+                    ],
+                    'laveurs' => $attribution->laveurs->map(fn ($laveur) => $this->formatLaveurSummary($laveur))->values(),
+                    'manager' => [
+                        'id' => $manager->id,
+                        'nom_complet' => $manager->first_name . ' ' . $manager->last_name
+                    ],
+                    ...$this->formatTypeLavageFields($typeLavage, $attribution->type_lavage_id),
+                    'notes' => $attribution->notes,
+                    'statut' => $attribution->statut,
+                    'date_attribution' => $attribution->date_attribution,
+                    'date_debut' => $attribution->date_debut
+                ];
 
                 return response()->json([
                     'success' => true,
-                    'message' => $formattedAttributions->count() > 1
+                    'message' => $laveurIds->count() > 1
                         ? 'Véhicule attribué avec succès aux laveurs'
                         : 'Véhicule attribué avec succès',
-                    'total_attributions' => $formattedAttributions->count(),
-                    'attribution' => $formattedAttributions->first(),
-                    'attributions' => $formattedAttributions
+                    'total_attributions' => 1,
+                    'total_laveurs' => $laveurIds->count(),
+                    'attribution' => $formattedAttribution,
+                    'attributions' => [$formattedAttribution],
                 ], 201);
 
             } catch (\Exception $e) {
@@ -1322,7 +1317,7 @@ class AuthController extends Controller
             }
 
             // Trouver l'attribution
-            $attribution = AttributionVehicule::with(['laveur', 'vehicule', 'typeLavage'])
+            $attribution = AttributionVehicule::with(['laveur', 'laveurs', 'vehicule', 'typeLavage'])
                                             ->where('id', $attributionId)
                                             ->where('statut', 'en_cours')
                                             ->where('station_lavage_id', $stationLavage->id)
@@ -1401,8 +1396,7 @@ class AuthController extends Controller
                 \Log::info('Lavage terminé', [
                     'manager_id' => $manager->id,
                     'manager_name' => $manager->first_name . ' ' . $manager->last_name,
-                    'laveur_id' => $attribution->laveur->id,
-                    'laveur_name' => $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name,
+                    'laveur_ids' => $attribution->laveurs->pluck('id'),
                     'matricule_vehicule' => $attribution->matricule_vehicule,
                     'attribution_id' => $attribution->id,
                     'recompense_attribuee' => $recompenseAttribuee
@@ -1416,7 +1410,7 @@ class AuthController extends Controller
                     'attribution' => [
                         'id' => $attribution->id,
                         'matricule_vehicule' => $attribution->matricule_vehicule,
-                        'laveur' => $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name,
+                        'laveurs' => $attribution->laveurs->map(fn ($laveur) => $this->formatLaveurSummary($laveur))->values(),
                         ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
                         'date_debut' => $attribution->date_debut,
                         'date_fin' => $attribution->date_fin,
@@ -1473,7 +1467,7 @@ class AuthController extends Controller
             }
 
             // Récupérer les attributions en cours
-            $attributions = AttributionVehicule::with(['laveur', 'vehicule.marque', 'typeLavage'])
+            $attributions = AttributionVehicule::with(['laveur', 'laveurs', 'vehicule.marque', 'typeLavage'])
                                               ->where('statut', 'en_cours')
                                               ->where('station_lavage_id', $stationLavage->id)
                                               ->orderBy('date_attribution', 'desc')
@@ -1491,11 +1485,7 @@ class AuthController extends Controller
                             'marque' => $attribution->vehicule->marque->libelle ?? 'Non spécifiée',
                             'modele' => $attribution->vehicule->modele ?? 'Non spécifié'
                         ],
-                        'laveur' => [
-                            'id' => $attribution->laveur->id,
-                            'nom_complet' => $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name,
-                            'mobile' => $attribution->laveur->mobile
-                        ],
+                        'laveurs' => $attribution->laveurs->map(fn ($laveur) => $this->formatLaveurSummary($laveur))->values(),
                         ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
                         'notes' => $attribution->notes,
                         'date_attribution' => $attribution->date_attribution,
@@ -1592,8 +1582,11 @@ class AuthController extends Controller
 
             $statut = $request->get('statut', 'en_cours');
 
-            $query = AttributionVehicule::with(['vehicule.marque', 'vehicule.user', 'typeLavage'])
-                ->where('laveur_id', $laveur->id)
+            $query = AttributionVehicule::with(['vehicule.marque', 'vehicule.user', 'typeLavage', 'laveurs'])
+                ->where(function ($query) use ($laveur) {
+                    $query->where('laveur_id', $laveur->id)
+                        ->orWhereHas('laveurs', fn ($subQuery) => $subQuery->where('lavages.id', $laveur->id));
+                })
                 ->orderBy('date_attribution', 'desc');
 
             if ($statut !== 'tous') {
@@ -1630,6 +1623,7 @@ class AuthController extends Controller
                                 'mobile' => $vehicule->user->mobile
                             ] : null
                         ],
+                        'laveurs' => $attribution->laveurs->map(fn ($laveur) => $this->formatLaveurSummary($laveur))->values(),
                         ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
                         'notes' => $attribution->notes,
                         'statut' => $attribution->statut,
@@ -1687,6 +1681,15 @@ class AuthController extends Controller
             'created_at' => $laveur->created_at,
             'updated_at' => $laveur->updated_at,
             'created_by' => $laveur->created_by,
+        ];
+    }
+
+    protected function formatLaveurSummary(Lavage $laveur): array
+    {
+        return [
+            'id' => $laveur->id,
+            'nom_complet' => $laveur->first_name . ' ' . $laveur->last_name,
+            'mobile' => $laveur->mobile,
         ];
     }
 

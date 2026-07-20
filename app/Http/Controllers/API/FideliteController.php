@@ -1103,7 +1103,7 @@ class FideliteController extends Controller
                 ->orderBy('date_attribution', 'desc')
                 ->get();
 
-            $attributionQuery = AttributionVehicule::with(['laveur', 'typeLavage'])
+            $attributionQuery = AttributionVehicule::with(['laveurs', 'typeLavage'])
                 ->where('matricule_vehicule', $vehicule->matricule);
 
             if ($stationLavage) {
@@ -1182,10 +1182,13 @@ class FideliteController extends Controller
                 'historique_lavages' => $attributions->take(10)->map(function ($attribution) {
                     return [
                         'id' => $attribution->id,
-                        'laveur' => $attribution->laveur ? [
-                            'id' => $attribution->laveur->id,
-                            'nom_complet' => $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name
-                        ] : null,
+                        'laveurs' => $attribution->laveurs->map(function ($laveur) {
+                            return [
+                                'id' => $laveur->id,
+                                'nom_complet' => $laveur->first_name . ' ' . $laveur->last_name,
+                                'mobile' => $laveur->mobile,
+                            ];
+                        })->values(),
                         'type_lavage_id' => $attribution->type_lavage_id,
                         'libelle' => $attribution->typeLavage?->libelle,
                         'montant' => $attribution->typeLavage?->montant,

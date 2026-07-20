@@ -257,7 +257,7 @@ class StationLavageController extends Controller
             ], 404);
         }
 
-        $query = AttributionVehicule::with(['typeLavage', 'laveur'])
+        $query = AttributionVehicule::with(['typeLavage', 'laveurs'])
             ->where('station_lavage_id', $stationLavage->id);
 
         if ($request->filled('date_debut')) {
@@ -318,17 +318,23 @@ class StationLavageController extends Controller
                     'revenu_realise' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
                 ];
             })->values(),
-            'par_laveur' => $attributions->groupBy('laveur_id')->map(function ($items, $laveurId) {
-                $laveur = $items->first()->laveur;
-                $itemsTermines = $items->where('statut', 'termine');
+            'par_laveur' => $attributions->flatMap(function ($attribution) {
+                return $attribution->laveurs->map(fn ($laveur) => [
+                    'laveur' => $laveur,
+                    'attribution' => $attribution,
+                ]);
+            })->groupBy(fn ($item) => $item['laveur']->id)->map(function ($items, $laveurId) {
+                $laveur = $items->first()['laveur'];
+                $attributionsLaveur = $items->pluck('attribution');
+                $itemsTermines = $attributionsLaveur->where('statut', 'termine');
 
                 return [
-                    'laveur_id' => $laveurId ? (int) $laveurId : null,
-                    'nom_complet' => $laveur ? $laveur->first_name . ' ' . $laveur->last_name : null,
-                    'total_lavages' => $items->count(),
-                    'lavages_en_cours' => $items->where('statut', 'en_cours')->count(),
+                    'laveur_id' => (int) $laveurId,
+                    'nom_complet' => $laveur->first_name . ' ' . $laveur->last_name,
+                    'total_lavages' => $attributionsLaveur->count(),
+                    'lavages_en_cours' => $attributionsLaveur->where('statut', 'en_cours')->count(),
                     'lavages_termines' => $itemsTermines->count(),
-                    'lavages_annules' => $items->where('statut', 'annule')->count(),
+                    'lavages_annules' => $attributionsLaveur->where('statut', 'annule')->count(),
                     'revenu_realise' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
                 ];
             })->values(),
@@ -336,7 +342,13 @@ class StationLavageController extends Controller
                 return [
                     'id' => $attribution->id,
                     'matricule_vehicule' => $attribution->matricule_vehicule,
-                    'laveur' => $attribution->laveur ? $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name : null,
+                    'laveurs' => $attribution->laveurs->map(function ($laveur) {
+                        return [
+                            'id' => $laveur->id,
+                            'nom_complet' => $laveur->first_name . ' ' . $laveur->last_name,
+                            'mobile' => $laveur->mobile,
+                        ];
+                    })->values(),
                     'type_lavage_id' => $attribution->type_lavage_id,
                     'libelle' => $attribution->typeLavage?->libelle,
                     'montant' => $attribution->typeLavage?->montant,
