@@ -14,10 +14,12 @@ use Illuminate\Support\Str;
 use App\Models\Lavage;
 use App\Models\Vehicule;
 use App\Models\AttributionVehicule;
+use App\Models\Type_lavage;
 use App\Models\Fidelite;
 use App\Models\Recompense;
 use App\Services\SmsService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
@@ -809,7 +811,13 @@ class AuthController extends Controller
                 'laveur_id' => 'required_without:laveur_ids|exists:lavages,id',
                 'laveur_ids' => 'required_without:laveur_id|array|min:1',
                 'laveur_ids.*' => 'integer|distinct|exists:lavages,id',
-                'type_lavage' => 'nullable|string|in:interieur,exterieur,complet,premium',
+                'type_lavage_id' => [
+                    'required',
+                    'integer',
+                    Rule::exists('type_lavages', 'id')->where(function ($query) use ($manager) {
+                        $query->where('lavage_id', $manager->id);
+                    }),
+                ],
                 'notes' => 'nullable|string|max:500'
             ], [
                 'matricule_vehicule.required' => 'Le matricule du véhicule est obligatoire.',
@@ -823,7 +831,8 @@ class AuthController extends Controller
                 'laveur_ids.*.integer' => 'Chaque laveur doit être identifié par un ID valide.',
                 'laveur_ids.*.distinct' => 'La liste des laveurs contient des doublons.',
                 'laveur_ids.*.exists' => 'Un des laveurs sélectionnés n\'existe pas.',
-                'type_lavage.in' => 'Le type de lavage doit être : interieur, exterieur, complet ou premium.'
+                'type_lavage_id.required' => 'Le type de lavage est obligatoire.',
+                'type_lavage_id.exists' => 'Le type de lavage sélectionné n\'existe pas ou ne vous appartient pas.'
             ]);
 
             if ($validator->fails()) {
@@ -841,6 +850,10 @@ class AuthController extends Controller
                     'message' => 'Station de lavage non trouvée. Seuls les administrateurs peuvent attribuer des véhicules.'
                 ], 404);
             }
+
+            $typeLavage = Type_lavage::where('id', $request->type_lavage_id)
+                ->where('lavage_id', $manager->id)
+                ->first();
 
             $laveurIds = $request->filled('laveur_ids')
                 ? collect($request->laveur_ids)->map(fn ($id) => (int) $id)->unique()->values()
@@ -875,7 +888,7 @@ class AuthController extends Controller
             }
 
             // Vérifier si le véhicule est déjà attribué aux mêmes laveurs
-            $attributionsExistantes = AttributionVehicule::with('laveur')
+            $attributionsExistantes = AttributionVehicule::with(['laveur', 'typeLavage'])
                                                       ->where('matricule_vehicule', $request->matricule_vehicule)
                                                       ->whereIn('laveur_id', $laveurIds)
                                                       ->where('statut', 'en_cours')
@@ -893,7 +906,7 @@ class AuthController extends Controller
                                 ? $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name
                                 : 'Laveur non trouvé',
                             'date_attribution' => $attribution->created_at,
-                            'type_lavage' => $attribution->type_lavage
+                            ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id)
                         ];
                     })->values()
                 ], 422);
@@ -911,7 +924,7 @@ class AuthController extends Controller
                         'matricule_vehicule' => $vehicule->matricule,
                         'laveur_id' => $laveur->id,
                         'manager_id' => $manager->id,
-                        'type_lavage' => $request->type_lavage ?? 'complet',
+                        'type_lavage_id' => $typeLavage->id,
                         'notes' => $request->notes,
                         'statut' => 'en_cours',
                         'date_attribution' => $now,
@@ -926,13 +939,13 @@ class AuthController extends Controller
                     'manager_name' => $manager->first_name . ' ' . $manager->last_name,
                     'laveur_ids' => $laveurIds,
                     'matricule_vehicule' => $vehicule->matricule,
-                    'type_lavage' => $request->type_lavage ?? 'complet',
+                    'type_lavage_id' => $typeLavage->id,
                     'attribution_ids' => $attributions->pluck('id')
                 ]);
 
                 DB::commit();
 
-                $formattedAttributions = $attributions->map(function ($attribution) use ($vehicule, $laveurs, $manager) {
+                $formattedAttributions = $attributions->map(function ($attribution) use ($vehicule, $laveurs, $manager, $typeLavage) {
                     $laveur = $laveurs->get($attribution->laveur_id);
 
                     return [
@@ -951,7 +964,7 @@ class AuthController extends Controller
                             'id' => $manager->id,
                             'nom_complet' => $manager->first_name . ' ' . $manager->last_name
                         ],
-                        'type_lavage' => $attribution->type_lavage,
+                        ...$this->formatTypeLavageFields($typeLavage, $attribution->type_lavage_id),
                         'notes' => $attribution->notes,
                         'statut' => $attribution->statut,
                         'date_attribution' => $attribution->date_attribution,
@@ -1012,7 +1025,7 @@ class AuthController extends Controller
             }
 
             // Trouver l'attribution
-            $attribution = AttributionVehicule::with(['laveur', 'vehicule'])
+            $attribution = AttributionVehicule::with(['laveur', 'vehicule', 'typeLavage'])
                                             ->where('id', $attributionId)
                                             ->where('statut', 'en_cours')
                                             ->where('station_lavage_id', $stationLavage->id)
@@ -1107,7 +1120,7 @@ class AuthController extends Controller
                         'id' => $attribution->id,
                         'matricule_vehicule' => $attribution->matricule_vehicule,
                         'laveur' => $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name,
-                        'type_lavage' => $attribution->type_lavage,
+                        ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
                         'date_debut' => $attribution->date_debut,
                         'date_fin' => $attribution->date_fin,
                         'duree' => $attribution->date_debut->diffInMinutes($attribution->date_fin) . ' minutes'
@@ -1163,7 +1176,7 @@ class AuthController extends Controller
             }
 
             // Récupérer les attributions en cours
-            $attributions = AttributionVehicule::with(['laveur', 'vehicule.marque'])
+            $attributions = AttributionVehicule::with(['laveur', 'vehicule.marque', 'typeLavage'])
                                               ->where('statut', 'en_cours')
                                               ->where('station_lavage_id', $stationLavage->id)
                                               ->orderBy('date_attribution', 'desc')
@@ -1186,7 +1199,7 @@ class AuthController extends Controller
                             'nom_complet' => $attribution->laveur->first_name . ' ' . $attribution->laveur->last_name,
                             'mobile' => $attribution->laveur->mobile
                         ],
-                        'type_lavage' => $attribution->type_lavage,
+                        ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
                         'notes' => $attribution->notes,
                         'date_attribution' => $attribution->date_attribution,
                         'date_debut' => $attribution->date_debut,
@@ -1282,7 +1295,7 @@ class AuthController extends Controller
 
             $statut = $request->get('statut', 'en_cours');
 
-            $query = AttributionVehicule::with(['vehicule.marque', 'vehicule.user'])
+            $query = AttributionVehicule::with(['vehicule.marque', 'vehicule.user', 'typeLavage'])
                 ->where('laveur_id', $laveur->id)
                 ->orderBy('date_attribution', 'desc');
 
@@ -1320,7 +1333,7 @@ class AuthController extends Controller
                                 'mobile' => $vehicule->user->mobile
                             ] : null
                         ],
-                        'type_lavage' => $attribution->type_lavage,
+                        ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
                         'notes' => $attribution->notes,
                         'statut' => $attribution->statut,
                         'date_attribution' => $attribution->date_attribution,
@@ -1351,6 +1364,15 @@ class AuthController extends Controller
     protected function findLavageByPhone(string $indicatif, string $mobile): ?Lavage
     {
         return Lavage::whereIn('mobile', $this->mobileVariants($indicatif, $mobile))->first();
+    }
+
+    protected function formatTypeLavageFields(?Type_lavage $typeLavage, ?int $typeLavageId = null): array
+    {
+        return [
+            'type_lavage_id' => $typeLavage?->id ?? $typeLavageId,
+            'libelle' => $typeLavage?->libelle,
+            'montant' => $typeLavage?->montant,
+        ];
     }
 
     protected function normalizeIndicatif(string $indicatif): string

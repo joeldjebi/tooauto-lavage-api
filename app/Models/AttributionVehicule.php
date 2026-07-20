@@ -15,7 +15,7 @@ class AttributionVehicule extends Model
         'matricule_vehicule',
         'laveur_id',
         'manager_id',
-        'type_lavage',
+        'type_lavage_id',
         'notes',
         'statut',
         'date_attribution',
@@ -34,12 +34,6 @@ class AttributionVehicule extends Model
     const STATUT_EN_COURS = 'en_cours';
     const STATUT_TERMINE = 'termine';
     const STATUT_ANNULE = 'annule';
-
-    // Constantes pour les types de lavage
-    const TYPE_INTERIEUR = 'interieur';
-    const TYPE_EXTERIEUR = 'exterieur';
-    const TYPE_COMPLET = 'complet';
-    const TYPE_PREMIUM = 'premium';
 
     /**
      * Relation avec le laveur
@@ -63,6 +57,14 @@ class AttributionVehicule extends Model
     public function vehicule()
     {
         return $this->belongsTo(Vehicule::class, 'matricule_vehicule', 'matricule');
+    }
+
+    /**
+     * Relation avec le type de lavage personnalisé.
+     */
+    public function typeLavage()
+    {
+        return $this->belongsTo(Type_lavage::class, 'type_lavage_id');
     }
 
     /**
@@ -113,21 +115,6 @@ class AttributionVehicule extends Model
         }
 
         return $heures . 'h ' . $minutesRestantes . 'min';
-    }
-
-    /**
-     * Obtenir le nom du type de lavage
-     */
-    public function getTypeLavageNameAttribute()
-    {
-        $types = [
-            self::TYPE_INTERIEUR => 'Intérieur',
-            self::TYPE_EXTERIEUR => 'Extérieur',
-            self::TYPE_COMPLET => 'Complet',
-            self::TYPE_PREMIUM => 'Premium'
-        ];
-
-        return $types[$this->type_lavage] ?? 'Non spécifié';
     }
 
     /**

@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('matricule_vehicule');
             $table->unsignedBigInteger('laveur_id');
             $table->unsignedBigInteger('manager_id');
-            $table->enum('type_lavage', ['interieur', 'exterieur', 'complet', 'premium'])->default('complet');
+            $table->foreignId('type_lavage_id')->nullable()->constrained('type_lavages')->nullOnDelete();
             $table->text('notes')->nullable();
             $table->enum('statut', ['en_cours', 'termine', 'annule'])->default('en_cours');
             $table->timestamp('date_attribution');
@@ -28,6 +28,7 @@ return new class extends Migration
             $table->index('matricule_vehicule');
             $table->index('laveur_id');
             $table->index('manager_id');
+            $table->index('type_lavage_id');
             $table->index('statut');
             $table->index('date_attribution');
 
