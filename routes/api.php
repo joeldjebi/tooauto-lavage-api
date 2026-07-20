@@ -87,10 +87,13 @@ Route::prefix('usagers')->middleware('auth:api')->group(function () {
 // Routes pour la gestion des laveurs (admin seulement)
 Route::prefix('laveurs')->middleware('auth:api')->group(function () {
     Route::get('/', [AuthController::class, 'getLaveurs']);
-    Route::get('/{laveurId}', [AuthController::class, 'getLaveurDetails']);
-    Route::post('/{laveurId}/toggle-status', [AuthController::class, 'toggleLaveurStatus']);
-    Route::post('/register', [AuthController::class, 'registerLaveur']);
     Route::get('/actifs', [AuthController::class, 'getLaveursActifs']);
+    Route::post('/register', [AuthController::class, 'registerLaveur']);
+    Route::get('/{laveurId}/stats', [AuthController::class, 'getLaveurStats'])->whereNumber('laveurId');
+    Route::post('/{laveurId}/toggle-status', [AuthController::class, 'toggleLaveurStatus'])->whereNumber('laveurId');
+    Route::get('/{laveurId}', [AuthController::class, 'getLaveurDetails'])->whereNumber('laveurId');
+    Route::put('/{laveurId}', [AuthController::class, 'updateLaveur'])->whereNumber('laveurId');
+    Route::delete('/{laveurId}', [AuthController::class, 'deleteLaveur'])->whereNumber('laveurId');
 });
 
 // Routes pour l'attribution de véhicules aux laveurs (manager seulement)

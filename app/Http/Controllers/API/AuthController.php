@@ -741,6 +741,303 @@ class AuthController extends Controller
         }
     }
 
+    public function updateLaveur(Request $request, $laveurId)
+    {
+        try {
+            $currentUser = Auth::guard('api')->user();
+            if (!$currentUser || $currentUser->role != 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé. Seuls les administrateurs peuvent modifier des laveurs.'
+                ], 403);
+            }
+
+            $laveur = Lavage::where('id', $laveurId)
+                ->where(['role' => 2, 'created_by' => $currentUser->id])
+                ->first();
+
+            if (!$laveur) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Laveur non trouvé',
+                    'detail' => 'Aucun laveur trouvé avec l\'ID ' . $laveurId . '.'
+                ], 404);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'first_name' => 'sometimes|required|string|max:100',
+                'last_name' => 'sometimes|required|string|max:100',
+                'mobile' => [
+                    'sometimes',
+                    'required',
+                    'string',
+                    'regex:/^[0-9]{10}$/',
+                    Rule::unique('lavages', 'mobile')->ignore($laveur->id),
+                ],
+                'email' => [
+                    'nullable',
+                    'email',
+                    Rule::unique('lavages', 'email')->ignore($laveur->id),
+                ],
+                'password' => 'nullable|string|min:6',
+                'statut' => 'sometimes|required|integer|in:0,1',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation échouée.',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $data = $request->only(['first_name', 'last_name', 'mobile', 'email', 'statut']);
+
+            if ($request->filled('password')) {
+                $data['password'] = Hash::make($request->password);
+            }
+
+            $laveur->update($data);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Laveur mis à jour avec succès.',
+                'laveur' => $this->formatLaveur($laveur->fresh()),
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur lors de la mise à jour du laveur', [
+                'laveur_id' => $laveurId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Une erreur est survenue lors de la mise à jour du laveur.',
+                'detail' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deleteLaveur($laveurId)
+    {
+        try {
+            $currentUser = Auth::guard('api')->user();
+            if (!$currentUser || $currentUser->role != 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé. Seuls les administrateurs peuvent supprimer des laveurs.'
+                ], 403);
+            }
+
+            $laveur = Lavage::where('id', $laveurId)
+                ->where(['role' => 2, 'created_by' => $currentUser->id])
+                ->first();
+
+            if (!$laveur) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Laveur non trouvé',
+                    'detail' => 'Aucun laveur trouvé avec l\'ID ' . $laveurId . '.'
+                ], 404);
+            }
+
+            $hasAttributions = AttributionVehicule::where('laveur_id', $laveur->id)->exists();
+
+            if ($hasAttributions) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Ce laveur a déjà des attributions.',
+                    'detail' => 'Désactivez plutôt ce laveur afin de conserver l\'historique des lavages.'
+                ], 422);
+            }
+
+            $laveur->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Laveur supprimé avec succès.',
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur lors de la suppression du laveur', [
+                'laveur_id' => $laveurId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Une erreur est survenue lors de la suppression du laveur.',
+                'detail' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getLaveurStats(Request $request, $laveurId)
+    {
+        try {
+            $currentUser = Auth::guard('api')->user();
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Utilisateur non authentifié.'
+                ], 401);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'date_debut' => 'nullable|date',
+                'date_fin' => 'nullable|date',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation échouée.',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            if ($request->filled('date_debut') && $request->filled('date_fin')) {
+                $dateDebut = \Carbon\Carbon::parse($request->date_debut);
+                $dateFin = \Carbon\Carbon::parse($request->date_fin);
+
+                if ($dateFin->lt($dateDebut)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Validation échouée.',
+                        'errors' => [
+                            'date_fin' => ['La date de fin doit être supérieure ou égale à la date de début.'],
+                        ],
+                    ], 422);
+                }
+            }
+
+            $laveur = Lavage::where('id', $laveurId)
+                ->where('role', 2)
+                ->first();
+
+            if (!$laveur) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Laveur non trouvé',
+                    'detail' => 'Aucun laveur trouvé avec l\'ID ' . $laveurId . '.'
+                ], 404);
+            }
+
+            if ($currentUser->role == 1 && (int) $laveur->created_by !== (int) $currentUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé.',
+                    'detail' => 'Ce laveur ne vous appartient pas.'
+                ], 403);
+            }
+
+            if ($currentUser->role == 2 && (int) $currentUser->id !== (int) $laveur->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé.',
+                    'detail' => 'Vous ne pouvez consulter que vos propres statistiques.'
+                ], 403);
+            }
+
+            if (!in_array((int) $currentUser->role, [1, 2], true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé.'
+                ], 403);
+            }
+
+            $query = AttributionVehicule::with(['typeLavage', 'vehicule.marque', 'vehicule.user'])
+                ->where('laveur_id', $laveur->id);
+
+            if ($request->filled('date_debut')) {
+                $query->where('date_attribution', '>=', \Carbon\Carbon::parse($request->date_debut)->startOfDay());
+            }
+
+            if ($request->filled('date_fin')) {
+                $query->where('date_attribution', '<=', \Carbon\Carbon::parse($request->date_fin)->endOfDay());
+            }
+
+            $attributions = $query->orderBy('date_attribution', 'desc')->get();
+            $termines = $attributions->where('statut', 'termine');
+            $now = now();
+            $durees = $termines->filter(fn ($attribution) => $attribution->date_debut && $attribution->date_fin)
+                ->map(fn ($attribution) => $attribution->date_debut->diffInMinutes($attribution->date_fin));
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Statistiques du laveur récupérées avec succès.',
+                'laveur' => $this->formatLaveur($laveur),
+                'periode' => [
+                    'date_debut' => $request->date_debut,
+                    'date_fin' => $request->date_fin,
+                ],
+                'global' => [
+                    'total_lavages' => $attributions->count(),
+                    'vehicules_uniques' => $attributions->pluck('matricule_vehicule')->unique()->count(),
+                    'lavages_en_cours' => $attributions->where('statut', 'en_cours')->count(),
+                    'lavages_termines' => $termines->count(),
+                    'lavages_annules' => $attributions->where('statut', 'annule')->count(),
+                    'revenu_genere' => $termines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                    'duree_moyenne_minutes' => $durees->isNotEmpty() ? round($durees->avg(), 2) : 0,
+                ],
+                'periodes' => [
+                    'aujourdhui' => $attributions->filter(fn ($attribution) => $attribution->date_attribution?->isSameDay($now))->count(),
+                    'cette_semaine' => $attributions->filter(fn ($attribution) => $attribution->date_attribution && $attribution->date_attribution->between($now->copy()->startOfWeek(), $now->copy()->endOfWeek()))->count(),
+                    'ce_mois' => $attributions->filter(fn ($attribution) => $attribution->date_attribution?->isSameMonth($now))->count(),
+                ],
+                'par_type_lavage' => $attributions->groupBy('type_lavage_id')->map(function ($items, $typeLavageId) {
+                    $typeLavage = $items->first()->typeLavage;
+                    $itemsTermines = $items->where('statut', 'termine');
+
+                    return [
+                        'type_lavage_id' => $typeLavageId ? (int) $typeLavageId : null,
+                        'libelle' => $typeLavage?->libelle,
+                        'montant' => $typeLavage?->montant,
+                        'total_lavages' => $items->count(),
+                        'lavages_en_cours' => $items->where('statut', 'en_cours')->count(),
+                        'lavages_termines' => $itemsTermines->count(),
+                        'lavages_annules' => $items->where('statut', 'annule')->count(),
+                        'revenu_genere' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                    ];
+                })->values(),
+                'dernieres_attributions' => $attributions->take(10)->map(function ($attribution) {
+                    $vehicule = $attribution->vehicule;
+
+                    return [
+                        'id' => $attribution->id,
+                        'matricule_vehicule' => $attribution->matricule_vehicule,
+                        'vehicule' => [
+                            'matricule' => $vehicule->matricule ?? $attribution->matricule_vehicule,
+                            'marque' => $vehicule && $vehicule->marque ? $vehicule->marque->libelle : null,
+                            'modele' => $vehicule->modele ?? null,
+                        ],
+                        ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
+                        'statut' => $attribution->statut,
+                        'date_attribution' => $attribution->date_attribution,
+                        'date_debut' => $attribution->date_debut,
+                        'date_fin' => $attribution->date_fin,
+                    ];
+                })->values(),
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur lors de la récupération des statistiques du laveur', [
+                'laveur_id' => $laveurId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Une erreur est survenue lors de la récupération des statistiques du laveur.',
+                'detail' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     /**
      * Obtenir la liste des laveurs actifs pour attribution de véhicules
      */
@@ -1372,6 +1669,24 @@ class AuthController extends Controller
             'type_lavage_id' => $typeLavage?->id ?? $typeLavageId,
             'libelle' => $typeLavage?->libelle,
             'montant' => $typeLavage?->montant,
+        ];
+    }
+
+    protected function formatLaveur(Lavage $laveur): array
+    {
+        return [
+            'id' => $laveur->id,
+            'first_name' => $laveur->first_name,
+            'last_name' => $laveur->last_name,
+            'full_name' => $laveur->first_name . ' ' . $laveur->last_name,
+            'mobile' => $laveur->mobile,
+            'email' => $laveur->email,
+            'statut' => $laveur->statut,
+            'statut_text' => $laveur->statut == 1 ? 'Actif' : 'Inactif',
+            'role' => $laveur->role,
+            'created_at' => $laveur->created_at,
+            'updated_at' => $laveur->updated_at,
+            'created_by' => $laveur->created_by,
         ];
     }
 
