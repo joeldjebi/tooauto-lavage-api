@@ -986,6 +986,7 @@ class AuthController extends Controller
                     'lavages_termines' => $termines->count(),
                     'lavages_annules' => $attributions->where('statut', 'annule')->count(),
                     'revenu_genere' => $termines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                    'gain_laveur_realise' => $termines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant_laveur ?? 0)),
                     'duree_moyenne_minutes' => $durees->isNotEmpty() ? round($durees->avg(), 2) : 0,
                 ],
                 'periodes' => [
@@ -1001,11 +1002,13 @@ class AuthController extends Controller
                         'type_lavage_id' => $typeLavageId ? (int) $typeLavageId : null,
                         'libelle' => $typeLavage?->libelle,
                         'montant' => $typeLavage?->montant,
+                        'montant_laveur' => $typeLavage?->montant_laveur,
                         'total_lavages' => $items->count(),
                         'lavages_en_cours' => $items->where('statut', 'en_cours')->count(),
                         'lavages_termines' => $itemsTermines->count(),
                         'lavages_annules' => $items->where('statut', 'annule')->count(),
                         'revenu_genere' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                        'gain_laveur_realise' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant_laveur ?? 0)),
                     ];
                 })->values(),
                 'dernieres_attributions' => $attributions->take(10)->map(function ($attribution) {
@@ -1663,6 +1666,7 @@ class AuthController extends Controller
             'type_lavage_id' => $typeLavage?->id ?? $typeLavageId,
             'libelle' => $typeLavage?->libelle,
             'montant' => $typeLavage?->montant,
+            'montant_laveur' => $typeLavage?->montant_laveur,
         ];
     }
 

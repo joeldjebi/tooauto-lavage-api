@@ -73,6 +73,7 @@ class StationLavageController extends Controller
         $validator = Validator::make($request->all(), [
             'libelle' => 'required|string|max:200|unique:type_lavages,libelle,NULL,id,lavage_id,' . $lavageId,
             'montant' => 'required|numeric|min:0',
+            'montant_laveur' => 'required|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -86,6 +87,7 @@ class StationLavageController extends Controller
         $typeLavage = Type_lavage::create([
             'libelle' => $request->libelle,
             'montant' => $request->montant,
+            'montant_laveur' => $request->montant_laveur,
             'lavage_id' => $lavageId,
         ]);
 
@@ -153,6 +155,7 @@ class StationLavageController extends Controller
                     ->ignore($typeLavage->id),
             ],
             'montant' => 'sometimes|required|numeric|min:0',
+            'montant_laveur' => 'sometimes|required|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -163,7 +166,7 @@ class StationLavageController extends Controller
             ], 422);
         }
 
-        $typeLavage->update($request->only(['libelle', 'montant']));
+        $typeLavage->update($request->only(['libelle', 'montant', 'montant_laveur']));
 
         return response()->json([
             'success' => true,
@@ -274,6 +277,12 @@ class StationLavageController extends Controller
 
         $revenuRealise = $termines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0));
         $revenuPotentiel = $attributions->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0));
+        $gainsLaveursRealises = $termines->sum(function ($attribution) {
+            return $attribution->laveurs->count() * (float) ($attribution->typeLavage?->montant_laveur ?? 0);
+        });
+        $gainsLaveursPotentiels = $attributions->sum(function ($attribution) {
+            return $attribution->laveurs->count() * (float) ($attribution->typeLavage?->montant_laveur ?? 0);
+        });
         $durees = $termines->filter(fn ($attribution) => $attribution->date_debut && $attribution->date_fin)
             ->map(fn ($attribution) => $attribution->date_debut->diffInMinutes($attribution->date_fin));
 
@@ -296,6 +305,8 @@ class StationLavageController extends Controller
                 'lavages_annules' => $attributions->where('statut', 'annule')->count(),
                 'revenu_realise' => $revenuRealise,
                 'revenu_potentiel' => $revenuPotentiel,
+                'gains_laveurs_realises' => $gainsLaveursRealises,
+                'gains_laveurs_potentiels' => $gainsLaveursPotentiels,
                 'duree_moyenne_minutes' => $durees->isNotEmpty() ? round($durees->avg(), 2) : 0,
             ],
             'periodes' => [
@@ -311,11 +322,15 @@ class StationLavageController extends Controller
                     'type_lavage_id' => $typeLavageId ? (int) $typeLavageId : null,
                     'libelle' => $typeLavage?->libelle,
                     'montant' => $typeLavage?->montant,
+                    'montant_laveur' => $typeLavage?->montant_laveur,
                     'total_lavages' => $items->count(),
                     'lavages_en_cours' => $items->where('statut', 'en_cours')->count(),
                     'lavages_termines' => $itemsTermines->count(),
                     'lavages_annules' => $items->where('statut', 'annule')->count(),
                     'revenu_realise' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                    'gains_laveurs_realises' => $itemsTermines->sum(function ($attribution) {
+                        return $attribution->laveurs->count() * (float) ($attribution->typeLavage?->montant_laveur ?? 0);
+                    }),
                 ];
             })->values(),
             'par_laveur' => $attributions->flatMap(function ($attribution) {
@@ -336,6 +351,7 @@ class StationLavageController extends Controller
                     'lavages_termines' => $itemsTermines->count(),
                     'lavages_annules' => $attributionsLaveur->where('statut', 'annule')->count(),
                     'revenu_realise' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                    'gain_laveur_realise' => $itemsTermines->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant_laveur ?? 0)),
                 ];
             })->values(),
             'dernieres_attributions' => $attributions->take(10)->map(function ($attribution) {
@@ -352,6 +368,7 @@ class StationLavageController extends Controller
                     'type_lavage_id' => $attribution->type_lavage_id,
                     'libelle' => $attribution->typeLavage?->libelle,
                     'montant' => $attribution->typeLavage?->montant,
+                    'montant_laveur' => $attribution->typeLavage?->montant_laveur,
                     'statut' => $attribution->statut,
                     'date_attribution' => $attribution->date_attribution,
                     'date_debut' => $attribution->date_debut,

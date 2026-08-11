@@ -14,11 +14,13 @@ class Type_lavage extends Model
     protected $fillable = [
         'libelle',
         'montant',
+        'montant_laveur',
         'lavage_id',
     ];
 
     protected $casts = [
         'montant' => 'decimal:2',
+        'montant_laveur' => 'decimal:2',
         'lavage_id' => 'integer',
     ];
 

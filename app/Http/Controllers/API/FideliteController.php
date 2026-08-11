@@ -1192,6 +1192,7 @@ class FideliteController extends Controller
                         'type_lavage_id' => $attribution->type_lavage_id,
                         'libelle' => $attribution->typeLavage?->libelle,
                         'montant' => $attribution->typeLavage?->montant,
+                        'montant_laveur' => $attribution->typeLavage?->montant_laveur,
                         'statut' => $attribution->statut,
                         'date_attribution' => $attribution->date_attribution,
                         'date_debut' => $attribution->date_debut,
