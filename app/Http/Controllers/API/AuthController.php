@@ -1143,7 +1143,16 @@ class AuthController extends Controller
                     'message' => 'Accès non autorisé. Seuls les managers peuvent attribuer des véhicules.'
                 ], 403);
             }
-            $lavageOwnerId = $manager->created_by ?: $manager->id;
+
+            $stationLavage = $this->resolveStationLavageForUser($manager);
+            if (!$stationLavage) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Station de lavage non trouvée. Seuls les administrateurs peuvent attribuer des véhicules.'
+                ], 404);
+            }
+
+            $lavageOwnerId = $stationLavage->created_by;
 
             // Valider la requête
             $validator = Validator::make($request->all(), [
@@ -1181,14 +1190,6 @@ class AuthController extends Controller
                     'message' => 'Validation échouée.',
                     'errors' => $validator->errors(),
                 ], 422);
-            }
-
-            $stationLavage = StationLavage::where('created_by', $lavageOwnerId)->first();
-            if (!$stationLavage) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Station de lavage non trouvée. Seuls les administrateurs peuvent attribuer des véhicules.'
-                ], 404);
             }
 
             $typeLavage = Type_lavage::where('id', $request->type_lavage_id)
