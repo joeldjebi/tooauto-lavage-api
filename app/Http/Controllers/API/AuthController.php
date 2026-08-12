@@ -390,77 +390,93 @@ class AuthController extends Controller
 
     public function registerLaveur(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'first_name' => 'required|string|max:100',
-            'last_name' => 'required|string|max:100',
-            'mobile' => 'required|string|unique:lavages|regex:/^[0-9]{10}$/',
-            'email' => 'nullable|email|unique:lavages'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()], 422);
-        }
-
-        $currentUser = Auth::guard('api')->user();
-        if (!$currentUser || $currentUser->role != 1) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Accès non autorisé. Seuls les administrateurs peuvent créer des laveurs.'
-            ], 403);
-        }
-        $stationLavage = StationLavage::where('created_by', $currentUser->id)->first();
-        if (!$stationLavage) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Station de lavage non trouvée. Seuls les administrateurs peuvent créer des laveurs.'
-            ], 404);
-        }
-
-        $paswordRandom = Str::random(6);
-
-        $passwordRegister = Hash::make($paswordRandom);
-
-        $lavage = Lavage::create([
-            'first_name' => $request->first_name,
-            'last_name' => $request->last_name,
-            'mobile' => $request->mobile,
-            'email' => $request->email,
-            'password' => $passwordRegister,
-            'role' => 2,
-            'statut' => 1,
-            'created_by' => $currentUser->id
-        ]);
-
-        // Log pour débogage
-        \Log::info('Nouvel utilisateur créé', [
-            'mobile' => $request->mobile,
-            'password_hash' => $passwordRegister
-        ]);
-
-        $message = "Votre mot de passe est : " . $paswordRandom;
-        $mobile = $request->mobile;
-        $smsSent = false;
-        $smsError = null;
-
         try {
-            $this->sendMessagePassword($message, $mobile);
-            $smsSent = true;
-        } catch (\Throwable $e) {
-            $smsError = $e->getMessage();
-
-            \Log::error('Erreur lors de l\'envoi du SMS au laveur', [
-                'laveur_id' => $lavage->id,
-                'mobile' => $mobile,
-                'error' => $smsError,
+            $validator = Validator::make($request->all(), [
+                'first_name' => 'required|string|max:100',
+                'last_name' => 'required|string|max:100',
+                'mobile' => 'required|string|unique:lavages|regex:/^[0-9]{10}$/',
+                'email' => 'nullable|email|unique:lavages'
             ]);
-        }
 
-        return response()->json([
-            'message' => 'Inscription réussie',
-            'user' => $lavage,
-            'sms_sent' => $smsSent,
-            'sms_error' => $smsError,
-        ]);
+            if ($validator->fails()) {
+                return response()->json(['error' => $validator->errors()], 422);
+            }
+
+            $currentUser = Auth::guard('api')->user();
+            if (!$currentUser || $currentUser->role != 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé. Seuls les administrateurs peuvent créer des laveurs.'
+                ], 403);
+            }
+            $lavageOwnerId = $currentUser->created_by ?: $currentUser->id;
+            $stationLavage = StationLavage::where('created_by', $lavageOwnerId)->first();
+            if (!$stationLavage) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Station de lavage non trouvée. Seuls les administrateurs peuvent créer des laveurs.'
+                ], 404);
+            }
+
+            $paswordRandom = Str::random(6);
+
+            $passwordRegister = Hash::make($paswordRandom);
+
+            $lavage = Lavage::create([
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'mobile' => $request->mobile,
+                'email' => $request->email,
+                'password' => $passwordRegister,
+                'role' => 2,
+                'statut' => 1,
+                'created_by' => $lavageOwnerId
+            ]);
+
+            // Log pour débogage
+            \Log::info('Nouvel utilisateur créé', [
+                'mobile' => $request->mobile,
+                'password_hash' => $passwordRegister
+            ]);
+
+            $message = "Votre mot de passe est : " . $paswordRandom;
+            $mobile = $request->mobile;
+            $smsSent = false;
+            $smsError = null;
+
+            try {
+                $this->sendMessagePassword($message, $mobile);
+                $smsSent = true;
+            } catch (\Throwable $e) {
+                $smsError = $e->getMessage();
+
+                \Log::error('Erreur lors de l\'envoi du SMS au laveur', [
+                    'laveur_id' => $lavage->id,
+                    'mobile' => $mobile,
+                    'error' => $smsError,
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Inscription réussie',
+                'user' => $lavage,
+                'sms_sent' => $smsSent,
+                'sms_error' => $smsError,
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('Erreur lors de la création du laveur', [
+                'mobile' => $request->mobile,
+                'email' => $request->email,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Une erreur est survenue lors de la création du laveur.',
+                'detail' => $e->getMessage(),
+            ], 500);
+        }
     }
 
 	public function sendMessagePassword($message, $reciever)
