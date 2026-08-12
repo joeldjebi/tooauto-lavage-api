@@ -18,13 +18,15 @@ use App\Models\Type_lavage;
 use App\Models\Fidelite;
 use App\Models\Recompense;
 use App\Services\SmsService;
+use App\Services\WasabiService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
     public function __construct(
-        protected SmsService $smsService
+        protected SmsService $smsService,
+        protected WasabiService $wasabiService
     ) {}
 
     public function login(Request $request)
@@ -183,15 +185,16 @@ class AuthController extends Controller
 
     protected function respondWithToken($token)
     {
-		$userId = Auth::guard('api')->user()->id;
-		$StationLavage = StationLavage::where('created_by', $userId)->first();
+		$user = Auth::guard('api')->user();
+        $lavageOwnerId = $user->created_by ?: $user->id;
+		$StationLavage = StationLavage::where('created_by', $lavageOwnerId)->first();
 
         return response()->json([
             'access_token' => $token,
             'token_type' => 'bearer',
             'expires_in' => Auth::guard('api')->factory()->getTTL() * 60,
-            'user' => Auth::guard('api')->user(),
-			'station_lavage' => $StationLavage
+            'user' => $user,
+			'station_lavage' => $this->attachStationLavageMediaUrls($StationLavage)
         ]);
     }
 
@@ -1110,6 +1113,7 @@ class AuthController extends Controller
                     'message' => 'Accès non autorisé. Seuls les managers peuvent attribuer des véhicules.'
                 ], 403);
             }
+            $lavageOwnerId = $manager->created_by ?: $manager->id;
 
             // Valider la requête
             $validator = Validator::make($request->all(), [
@@ -1120,8 +1124,8 @@ class AuthController extends Controller
                 'type_lavage_id' => [
                     'required',
                     'integer',
-                    Rule::exists('type_lavages', 'id')->where(function ($query) use ($manager) {
-                        $query->where('lavage_id', $manager->id);
+                    Rule::exists('type_lavages', 'id')->where(function ($query) use ($lavageOwnerId) {
+                        $query->where('lavage_id', $lavageOwnerId);
                     }),
                 ],
                 'notes' => 'nullable|string|max:500'
@@ -1149,7 +1153,7 @@ class AuthController extends Controller
                 ], 422);
             }
 
-            $stationLavage = StationLavage::where('created_by', $manager->id)->first();
+            $stationLavage = StationLavage::where('created_by', $lavageOwnerId)->first();
             if (!$stationLavage) {
                 return response()->json([
                     'success' => false,
@@ -1158,7 +1162,7 @@ class AuthController extends Controller
             }
 
             $typeLavage = Type_lavage::where('id', $request->type_lavage_id)
-                ->where('lavage_id', $manager->id)
+                ->where('lavage_id', $lavageOwnerId)
                 ->first();
 
             $laveurIds = $request->filled('laveur_ids')
@@ -1167,7 +1171,7 @@ class AuthController extends Controller
 
             // Vérifier que les laveurs sont bien des laveurs actifs du manager
             $laveurs = Lavage::whereIn('id', $laveurIds)
-                           ->where(['role' => 2, 'created_by' => $manager->id])
+                           ->where(['role' => 2, 'created_by' => $lavageOwnerId])
                            ->where('statut', 1)
                            ->get()
                            ->keyBy('id');
@@ -1695,6 +1699,19 @@ class AuthController extends Controller
             'nom_complet' => $laveur->first_name . ' ' . $laveur->last_name,
             'mobile' => $laveur->mobile,
         ];
+    }
+
+    protected function attachStationLavageMediaUrls($station)
+    {
+        if (!$station) {
+            return $station;
+        }
+
+        $station->logo = $station->logo
+            ? $this->wasabiService->temporaryUrl($station->logo)
+            : null;
+
+        return $station;
     }
 
     protected function normalizeIndicatif(string $indicatif): string
