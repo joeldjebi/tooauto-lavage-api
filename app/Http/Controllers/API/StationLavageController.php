@@ -943,7 +943,17 @@ class StationLavageController extends Controller
             return [null, null];
         }
 
-        return [$lavage, $lavage->created_by ?: $lavage->id];
+        $candidateOwnerIds = collect([$lavage->id, $lavage->created_by])
+            ->filter()
+            ->unique()
+            ->values();
+
+        $stationLavage = StationLavage::whereIn('created_by', $candidateOwnerIds)
+            ->get()
+            ->sortBy(fn ($station) => $candidateOwnerIds->search($station->created_by))
+            ->first();
+
+        return [$lavage, $stationLavage?->created_by ?? $lavage->id];
     }
 
     protected function normalizeStationLavageLogoPath($value)
