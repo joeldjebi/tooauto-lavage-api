@@ -408,8 +408,7 @@ class AuthController extends Controller
                     'message' => 'Accès non autorisé. Seuls les administrateurs peuvent créer des laveurs.'
                 ], 403);
             }
-            $lavageOwnerId = $currentUser->created_by ?: $currentUser->id;
-            $stationLavage = StationLavage::where('created_by', $lavageOwnerId)->first();
+            $stationLavage = $this->resolveStationLavageForUser($currentUser);
             if (!$stationLavage) {
                 return response()->json([
                     'success' => false,
@@ -429,7 +428,7 @@ class AuthController extends Controller
                 'password' => $passwordRegister,
                 'role' => 2,
                 'statut' => 1,
-                'created_by' => $lavageOwnerId
+                'created_by' => $stationLavage->created_by
             ]);
 
             // Log pour débogage
