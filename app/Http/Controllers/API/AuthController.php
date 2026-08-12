@@ -186,8 +186,7 @@ class AuthController extends Controller
     protected function respondWithToken($token)
     {
 		$user = Auth::guard('api')->user();
-        $lavageOwnerId = $user->created_by ?: $user->id;
-		$StationLavage = StationLavage::where('created_by', $lavageOwnerId)->first();
+		$StationLavage = $this->resolveStationLavageForUser($user);
 
         return response()->json([
             'access_token' => $token,
@@ -439,8 +438,8 @@ class AuthController extends Controller
                 'password_hash' => $passwordRegister
             ]);
 
-            $message = "Votre mot de passe est : " . $paswordRandom;
             $mobile = $request->mobile;
+            $message = $this->buildLaveurCredentialsMessage($mobile, $paswordRandom);
             $smsSent = false;
             $smsError = null;
 
@@ -1744,6 +1743,30 @@ class AuthController extends Controller
             : null;
 
         return $station;
+    }
+
+    protected function resolveStationLavageForUser(Lavage $user)
+    {
+        $candidateOwnerIds = collect([$user->id, $user->created_by])
+            ->filter()
+            ->unique()
+            ->values();
+
+        return StationLavage::whereIn('created_by', $candidateOwnerIds)
+            ->get()
+            ->sortBy(fn ($station) => $candidateOwnerIds->search($station->created_by))
+            ->first();
+    }
+
+    protected function buildLaveurCredentialsMessage(string $mobile, string $password): string
+    {
+        $appLink = rtrim((string) config('app.url'), '/');
+        $displayMobile = str_starts_with($mobile, '+') ? $mobile : '+225' . $mobile;
+
+        return "TOO AUTO - Vos acces laveur\n"
+            . "Numero: " . $displayMobile . "\n"
+            . "Mot de passe: " . $password . "\n"
+            . "Application: " . $appLink;
     }
 
     protected function normalizeIndicatif(string $indicatif): string
