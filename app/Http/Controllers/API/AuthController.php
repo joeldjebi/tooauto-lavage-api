@@ -439,11 +439,27 @@ class AuthController extends Controller
 
         $message = "Votre mot de passe est : " . $paswordRandom;
         $mobile = $request->mobile;
-        $this->sendMessagePassword($message, $mobile);
+        $smsSent = false;
+        $smsError = null;
+
+        try {
+            $this->sendMessagePassword($message, $mobile);
+            $smsSent = true;
+        } catch (\Throwable $e) {
+            $smsError = $e->getMessage();
+
+            \Log::error('Erreur lors de l\'envoi du SMS au laveur', [
+                'laveur_id' => $lavage->id,
+                'mobile' => $mobile,
+                'error' => $smsError,
+            ]);
+        }
 
         return response()->json([
             'message' => 'Inscription réussie',
-            'user' => $lavage
+            'user' => $lavage,
+            'sms_sent' => $smsSent,
+            'sms_error' => $smsError,
         ]);
     }
 
