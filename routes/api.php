@@ -7,6 +7,7 @@ use App\Http\Controllers\API\StationLavageController;
 use App\Http\Controllers\API\FideliteController;
 use App\Http\Controllers\API\AsignQrCodeController;
 use App\Http\Controllers\API\UsagerController;
+use App\Http\Controllers\API\ReductionCardController;
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -66,6 +67,13 @@ Route::prefix('carte-fidelite')->middleware('auth:api')->group(function () {
     Route::get('/recompenses/{usager_id}/{matricule_vehicule}', [FideliteController::class, 'getRecompenses']);
     Route::get('/usagers-fideles', [FideliteController::class, 'getUsagersFideles']);
     Route::get('/statistiques', [FideliteController::class, 'getStatistiquesFidelite']);
+});
+
+// Routes pour l'application des cartes de réduction côté établissement
+Route::prefix('reduction-cards')->middleware('auth:api')->group(function () {
+    Route::post('/verify', [ReductionCardController::class, 'verify']);
+    Route::post('/apply', [ReductionCardController::class, 'apply']);
+    Route::get('/histories', [ReductionCardController::class, 'histories']);
 });
 
 // Routes pour la gestion des récompenses

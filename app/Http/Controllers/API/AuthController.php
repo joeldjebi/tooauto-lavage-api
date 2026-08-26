@@ -213,15 +213,23 @@ class AuthController extends Controller
 
         $password = Hash::make($request->password);
 
-        $lavage = Lavage::create([
-            'first_name' => $request->first_name,
-            'last_name' => $request->last_name,
-            'mobile' => $request->mobile,
-            'email' => $request->email,
-            'password' => $password,
-            'role' => 1,
-            'statut' => 1
-        ]);
+        $lavage = DB::transaction(function () use ($request, $password) {
+            $lavage = Lavage::create([
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'mobile' => $request->mobile,
+                'email' => $request->email,
+                'password' => $password,
+                'role' => 1,
+                'statut' => 1,
+                'created_by' => 0
+            ]);
+
+            $lavage->created_by = $lavage->id;
+            $lavage->save();
+
+            return $lavage;
+        });
 
         // Log pour débogage
         \Log::info('Nouvel utilisateur créé', [
