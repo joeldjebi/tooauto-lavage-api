@@ -8,6 +8,7 @@ use App\Http\Controllers\API\FideliteController;
 use App\Http\Controllers\API\AsignQrCodeController;
 use App\Http\Controllers\API\UsagerController;
 use App\Http\Controllers\API\ReductionCardController;
+use App\Http\Controllers\API\ReductionCampaignController;
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -74,6 +75,20 @@ Route::prefix('reduction-cards')->middleware('auth:api')->group(function () {
     Route::post('/verify', [ReductionCardController::class, 'verify']);
     Route::post('/apply', [ReductionCardController::class, 'apply']);
     Route::get('/histories', [ReductionCardController::class, 'histories']);
+});
+
+// Routes pour les campagnes de réduction des établissements
+Route::prefix('reduction-campaigns')->middleware('auth:api')->group(function () {
+    Route::get('/', [ReductionCampaignController::class, 'index']);
+    Route::post('/', [ReductionCampaignController::class, 'store']);
+    Route::get('/active', [ReductionCampaignController::class, 'active']);
+    Route::post('/verify-card', [ReductionCampaignController::class, 'verifyCard']);
+    Route::post('/apply', [ReductionCampaignController::class, 'apply']);
+    Route::get('/usages', [ReductionCampaignController::class, 'usages']);
+    Route::get('/{reductionCampaign}', [ReductionCampaignController::class, 'show'])->whereNumber('reductionCampaign');
+    Route::post('/{reductionCampaign}', [ReductionCampaignController::class, 'update'])->whereNumber('reductionCampaign');
+    Route::put('/{reductionCampaign}', [ReductionCampaignController::class, 'update'])->whereNumber('reductionCampaign');
+    Route::delete('/{reductionCampaign}', [ReductionCampaignController::class, 'destroy'])->whereNumber('reductionCampaign');
 });
 
 // Routes pour la gestion des récompenses
