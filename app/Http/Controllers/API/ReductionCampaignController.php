@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\ReductionCampaign;
 use App\Models\ReductionCampaignUsage;
+use App\Models\Type_lavage;
 use App\Models\UserReductionCard;
 use App\Services\WasabiService;
 use Illuminate\Http\Request;
@@ -59,6 +60,12 @@ class ReductionCampaignController extends Controller
         }
 
         $data = $validator->validated();
+        $productOrService = $this->prepareProductOrService($request);
+        if (!$productOrService['success']) {
+            return $this->businessError($productOrService);
+        }
+
+        $data['product_or_service'] = $productOrService['value'];
         $data['quantity_used'] = 0;
         $data['created_by'] = auth('api')->id();
 
@@ -113,6 +120,15 @@ class ReductionCampaignController extends Controller
         }
 
         $data = $validator->validated();
+
+        if ($request->has('product_or_service')) {
+            $productOrService = $this->prepareProductOrService($request);
+            if (!$productOrService['success']) {
+                return $this->businessError($productOrService);
+            }
+
+            $data['product_or_service'] = $productOrService['value'];
+        }
 
         $lockedFields = ['discount_type', 'discount_value', 'normal_price', 'promotional_price'];
         if ($reductionCampaign->usages()->exists() && collect($lockedFields)->contains(fn ($field) => array_key_exists($field, $data))) {
@@ -411,7 +427,8 @@ class ReductionCampaignController extends Controller
             'name' => "{$required}|string|max:255",
             'image' => 'nullable|file|image|max:4096',
             'description' => 'nullable|string',
-            'product_or_service' => "{$required}|string|max:255",
+            'product_or_service' => $required,
+            'product_or_service.*' => 'max:200',
             'discount_type' => [$required, Rule::in(['percentage', 'fixed'])],
             'discount_value' => 'nullable|numeric|min:0',
             'normal_price' => "{$required}|numeric|min:0",
@@ -421,7 +438,27 @@ class ReductionCampaignController extends Controller
             'quantity_available' => 'nullable|integer|min:1',
             'conditions' => 'nullable|string',
             'statut' => 'nullable|integer|in:0,1',
-        ]);
+        ])->after(function ($validator) use ($request) {
+            if (!$request->has('product_or_service')) {
+                return;
+            }
+
+            $value = $request->input('product_or_service');
+
+            if (is_string($value) && trim($value) !== '' && mb_strlen($value) <= 255) {
+                return;
+            }
+
+            if (is_array($value) && count(array_filter($value, fn ($item) => trim((string) $item) !== '')) > 0) {
+                $normalized = $this->normalizeProductOrService($value);
+
+                if (mb_strlen($normalized) <= 255) {
+                    return;
+                }
+            }
+
+            $validator->errors()->add('product_or_service', 'Le produit ou service doit être une valeur texte ou une liste de valeurs texte de 255 caractères maximum.');
+        });
     }
 
     protected function scanValidator(Request $request)
@@ -543,6 +580,99 @@ class ReductionCampaignController extends Controller
         return null;
     }
 
+    protected function normalizeProductOrService($value): string
+    {
+        if (is_array($value)) {
+            return collect($value)
+                ->filter(fn ($item) => trim((string) $item) !== '')
+                ->map(fn ($item) => trim((string) $item))
+                ->unique()
+                ->implode(',');
+        }
+
+        return trim((string) $value);
+    }
+
+    protected function prepareProductOrService(Request $request): array
+    {
+        $normalized = $this->normalizeProductOrService($request->input('product_or_service'));
+
+        if ($request->input('establishment_type') !== 'lavage') {
+            return [
+                'success' => true,
+                'value' => $normalized,
+            ];
+        }
+
+        $ids = $this->extractNumericIds($normalized);
+
+        if (empty($ids)) {
+            return [
+                'success' => true,
+                'value' => $normalized,
+            ];
+        }
+
+        $existingIds = Type_lavage::where('lavage_id', (int) $request->input('establishment_id'))
+            ->whereIn('id', $ids)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $missingIds = array_values(array_diff($ids, $existingIds));
+
+        if (!empty($missingIds)) {
+            return [
+                'success' => false,
+                'message' => 'Certains services sélectionnés ne sont pas liés à ce lavage.',
+                'status' => 422,
+            ];
+        }
+
+        return [
+            'success' => true,
+            'value' => implode(',', $ids),
+        ];
+    }
+
+    protected function extractNumericIds(?string $value): array
+    {
+        if (!$value) {
+            return [];
+        }
+
+        $ids = [];
+        foreach (array_map('trim', explode(',', $value)) as $item) {
+            if ($item !== '' && ctype_digit($item)) {
+                $ids[] = (int) $item;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    protected function resolveProductOrServiceLibelles(ReductionCampaign $campaign): array
+    {
+        $fallback = array_values(array_filter(array_map('trim', explode(',', (string) $campaign->product_or_service))));
+
+        if ($campaign->establishment_type !== 'lavage') {
+            return $fallback;
+        }
+
+        $ids = $this->extractNumericIds($campaign->product_or_service);
+
+        if (empty($ids)) {
+            return $fallback;
+        }
+
+        return Type_lavage::whereIn('id', $ids)
+            ->get()
+            ->sortBy(fn ($typeLavage) => array_search((int) $typeLavage->id, $ids, true))
+            ->pluck('libelle')
+            ->values()
+            ->all();
+    }
+
     protected function discountValueFromPrices(float $normalPrice, float $promotionalPrice, string $discountType): float
     {
         $montantReduction = max(round($normalPrice - $promotionalPrice, 2), 0);
@@ -569,6 +699,8 @@ class ReductionCampaignController extends Controller
             'image_url' => $campaign->image ? $this->wasabiService->temporaryUrl($campaign->image) : null,
             'description' => $campaign->description,
             'product_or_service' => $campaign->product_or_service,
+            'product_or_service_ids' => $this->extractNumericIds($campaign->product_or_service),
+            'product_or_service_libelles' => $this->resolveProductOrServiceLibelles($campaign),
             'discount_type' => $campaign->discount_type,
             'discount_value' => $amounts['discount_value'],
             'normal_price' => (float) $campaign->normal_price,
