@@ -28,13 +28,18 @@ return [
         'key' => env('RESEND_KEY'),
     ],
 	
-	    'mtarget' => [
+    'mtarget' => [
         'url' => env('MTARGET_URL', 'https://api-public-2.mtarget.fr/messages'),
         'username' => env('MTARGET_USERNAME', 'bwantech'),
         'password' => env('MTARGET_PASSWORD', 'x7jyKG0IJRNH'),
         'sender' => env('MTARGET_SENDER', 'TOO AUTO'),
         'timeout' => env('MTARGET_TIMEOUT', 30),
         'verify_ssl' => env('MTARGET_VERIFY_SSL', false),
+    ],
+
+    'register_auto_abonnement' => [
+        'enabled' => env('REGISTER_AUTO_ABONNEMENT', false),
+        'forfait' => env('REGISTER_AUTO_ABONNEMENT_FORFAIT', 'FREEMIUM'),
     ],
 
     'slack' => [

@@ -12,6 +12,8 @@ use App\Models\Vehicule;
 use App\Models\Lavage;
 use App\Models\Parrain;
 use App\Models\ReferralCode;
+use App\Models\Forfait_usager;
+use App\Models\AbonnementUsager;
 use Validator;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
@@ -28,14 +30,17 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
 use App\Services\WasabiService;
+use App\Services\ReductionCardService;
 
 class UsagerController extends Controller
 {
 	protected $wasabiService;
+	protected $reductionCardService;
 
-	public function __construct(WasabiService $wasabiService)
+	public function __construct(WasabiService $wasabiService, ReductionCardService $reductionCardService)
 	{
 		$this->wasabiService = $wasabiService;
+		$this->reductionCardService = $reductionCardService;
 	}
 
 	public function registerUsager(Request $request)
@@ -119,6 +124,8 @@ class UsagerController extends Controller
 				$vehicule->save();
 			}
 
+			$abonnement = $this->createAutoAbonnementForUser($user);
+
 			// Commit de la transaction
 			DB::commit();
 
@@ -136,13 +143,26 @@ class UsagerController extends Controller
 			// Envoyer le SMS
 			$smsResponse = $this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
 
-			return response()->json([
+			$response = [
 				'success' => true,
 				'message' => 'Utilisateur enregistré avec succès.',
 				'user' => $user,
 				'vehicule' => $vehicule ? $this->attachVehiculePhotoUrls($vehicule) : null,
-			], 201); // Utilisation du code HTTP 201 pour "Created"
+			];
 
+			if ($abonnement) {
+				$response['abonnement'] = $abonnement->load('forfait');
+			}
+
+			return response()->json($response, 201); // Utilisation du code HTTP 201 pour "Created"
+
+		} catch (\InvalidArgumentException $e) {
+			DB::rollBack();
+
+			return response()->json([
+				'success' => false,
+				'message' => $e->getMessage(),
+			], 422);
 		} catch (\Exception $e) {
 			// Rollback de la transaction en cas d'erreur
 			DB::rollBack();
@@ -153,6 +173,46 @@ class UsagerController extends Controller
 				'dev' => $e->getMessage(),
 			], 500);
 		}
+	}
+
+	protected function createAutoAbonnementForUser(User $user): ?AbonnementUsager
+	{
+		$enabled = filter_var(config('services.register_auto_abonnement.enabled'), FILTER_VALIDATE_BOOLEAN);
+
+		if (!$enabled) {
+			return null;
+		}
+
+		$forfaitCode = strtoupper(trim((string) config('services.register_auto_abonnement.forfait', 'FREEMIUM')));
+		$allowedForfaits = ['FREEMIUM', 'PERSONNEL', 'FAMILLE'];
+
+		if (!in_array($forfaitCode, $allowedForfaits, true)) {
+			throw new \InvalidArgumentException("Forfait d'abonnement automatique invalide: {$forfaitCode}.");
+		}
+
+		$forfait = Forfait_usager::whereRaw('UPPER(TRIM(libelle)) = ?', [$forfaitCode])
+			->where('statut', 1)
+			->first();
+
+		if (!$forfait) {
+			throw new \InvalidArgumentException("Forfait d'abonnement automatique actif introuvable: {$forfaitCode}.");
+		}
+
+		$dateDebut = now()->toDateString();
+		$dateFin = now()->addMonths((int) $forfait->duree)->toDateString();
+
+		$abonnement = AbonnementUsager::create([
+			'user_id' => $user->id,
+			'forfait_id' => $forfait->id,
+			'date_debut' => $dateDebut,
+			'date_fin' => $dateFin,
+			'statut' => 1,
+			'is_free' => 1,
+		]);
+
+		$this->reductionCardService->assignCardsToSubscription($abonnement);
+
+		return $abonnement;
 	}
 
 	public function getUsagerByStation()
