@@ -420,12 +420,15 @@ class ReductionCampaignController extends Controller
     protected function campaignValidator(Request $request, bool $isUpdate = false)
     {
         $required = $isUpdate ? 'sometimes' : 'required';
+        $imageRule = $request->hasFile('image')
+            ? 'nullable|file|image|max:4096'
+            : 'nullable|string|max:255';
 
         return Validator::make($request->all(), [
             'establishment_type' => [$required, Rule::in(['etablissement', 'lavage', 'station'])],
             'establishment_id' => "{$required}|integer|min:1",
             'name' => "{$required}|string|max:255",
-            'image' => 'nullable|file|image|max:4096',
+            'image' => $imageRule,
             'description' => 'nullable|string',
             'product_or_service' => $required,
             'product_or_service.*' => 'max:200',
