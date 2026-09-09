@@ -81,8 +81,13 @@ class ReductionCampaignController extends Controller
         );
         $data['statut'] = (int) ($data['statut'] ?? 1);
 
-        if ($request->hasFile('image')) {
-            $data['image'] = $this->wasabiService->uploadFile($request->file('image'), 'reduction-campaigns', 'campaign');
+        $imageUpload = $this->uploadCampaignImage($request);
+        if (!$imageUpload['success']) {
+            return $this->businessError($imageUpload);
+        }
+
+        if ($imageUpload['path']) {
+            $data['image'] = $imageUpload['path'];
         }
 
         $campaign = DB::transaction(function () use ($data) {
@@ -151,12 +156,18 @@ class ReductionCampaignController extends Controller
             );
         }
 
-        if ($request->hasFile('image')) {
-            if ($reductionCampaign->image) {
-                $this->wasabiService->deleteFile($reductionCampaign->image);
-            }
+        $imageUpload = $this->uploadCampaignImage($request);
+        if (!$imageUpload['success']) {
+            return $this->businessError($imageUpload);
+        }
 
-            $data['image'] = $this->wasabiService->uploadFile($request->file('image'), 'reduction-campaigns', 'campaign');
+        if ($imageUpload['path']) {
+            $oldImage = $reductionCampaign->image;
+            $data['image'] = $imageUpload['path'];
+
+            if ($oldImage) {
+                $this->deleteCampaignImage($oldImage);
+            }
         }
 
         DB::transaction(function () use ($reductionCampaign, $data) {
@@ -420,15 +431,12 @@ class ReductionCampaignController extends Controller
     protected function campaignValidator(Request $request, bool $isUpdate = false)
     {
         $required = $isUpdate ? 'sometimes' : 'required';
-        $imageRule = $request->hasFile('image')
-            ? 'nullable|file|image|max:4096'
-            : 'nullable|string|max:255';
 
         return Validator::make($request->all(), [
             'establishment_type' => [$required, Rule::in(['etablissement', 'lavage', 'station'])],
             'establishment_id' => "{$required}|integer|min:1",
             'name' => "{$required}|string|max:255",
-            'image' => $imageRule,
+            'image' => 'nullable',
             'description' => 'nullable|string',
             'product_or_service' => $required,
             'product_or_service.*' => 'max:200',
@@ -442,6 +450,8 @@ class ReductionCampaignController extends Controller
             'conditions' => 'nullable|string',
             'statut' => 'nullable|integer|in:0,1',
         ])->after(function ($validator) use ($request) {
+            $this->validateCampaignImage($validator, $request);
+
             if (!$request->has('product_or_service')) {
                 return;
             }
@@ -583,6 +593,81 @@ class ReductionCampaignController extends Controller
         return null;
     }
 
+    protected function validateCampaignImage($validator, Request $request): void
+    {
+        if (!$this->imageWasSent($request)) {
+            return;
+        }
+
+        if (!$request->hasFile('image')) {
+            $validator->errors()->add('image', 'Le champ image doit être un fichier envoyé en multipart/form-data avec la clé "image"; les liens, chemins texte et base64 ne sont pas acceptés.');
+            return;
+        }
+
+        $file = $request->file('image');
+
+        if (!$file->isValid()) {
+            $validator->errors()->add('image', 'Le fichier image n’a pas été correctement reçu par PHP: ' . $file->getErrorMessage());
+            return;
+        }
+
+        $allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        $mimeType = $file->getMimeType();
+
+        if (!in_array($mimeType, $allowedMimeTypes, true)) {
+            $validator->errors()->add('image', 'Le fichier envoyé doit être une image JPEG, PNG, WEBP ou GIF. Type détecté: ' . ($mimeType ?: 'inconnu') . '.');
+        }
+
+        if ($file->getSize() > 4096 * 1024) {
+            $validator->errors()->add('image', 'L’image ne doit pas dépasser 4 Mo.');
+        }
+    }
+
+    protected function uploadCampaignImage(Request $request): array
+    {
+        if (!$this->imageWasSent($request)) {
+            return [
+                'success' => true,
+                'path' => null,
+            ];
+        }
+
+        if (!$request->hasFile('image')) {
+            return [
+                'success' => false,
+                'message' => 'Image non enregistrée: le champ image doit être envoyé comme fichier multipart/form-data avec la clé "image".',
+                'status' => 422,
+            ];
+        }
+
+        try {
+            return [
+                'success' => true,
+                'path' => $this->wasabiService->uploadFile($request->file('image'), 'reduction-campaigns', 'campaign'),
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'success' => false,
+                'message' => 'Image valide, mais l’envoi vers Wasabi a échoué: ' . $e->getMessage(),
+                'status' => 500,
+            ];
+        }
+    }
+
+    protected function imageWasSent(Request $request): bool
+    {
+        return $request->hasFile('image') || $request->files->has('image') || $request->has('image');
+    }
+
+    protected function deleteCampaignImage(string $path): void
+    {
+        try {
+            $this->wasabiService->deleteFile($path);
+        } catch (\Throwable) {
+            // La campagne pointe déjà vers la nouvelle image; l'ancien fichier pourra être nettoyé séparément.
+        }
+    }
+
     protected function normalizeProductOrService($value): string
     {
         if (is_array($value)) {
@@ -699,7 +784,7 @@ class ReductionCampaignController extends Controller
             'establishment_id' => $campaign->establishment_id,
             'name' => $campaign->name,
             'image' => $campaign->image,
-            'image_url' => $campaign->image ? $this->wasabiService->temporaryUrl($campaign->image) : null,
+            'image_url' => $this->signedCampaignImageUrl($campaign->image),
             'description' => $campaign->description,
             'product_or_service' => $campaign->product_or_service,
             'product_or_service_ids' => $this->extractNumericIds($campaign->product_or_service),
@@ -787,6 +872,19 @@ class ReductionCampaignController extends Controller
             'mobile' => $lavage->mobile,
             'email' => $lavage->email,
         ];
+    }
+
+    protected function signedCampaignImageUrl(?string $path): ?string
+    {
+        if (!$path) {
+            return null;
+        }
+
+        try {
+            return $this->wasabiService->temporaryUrl($path);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     protected function validationError($validator)
