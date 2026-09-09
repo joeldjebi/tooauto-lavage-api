@@ -69,14 +69,19 @@ class ReductionCampaignController extends Controller
         $data['quantity_used'] = 0;
         $data['created_by'] = auth('api')->id();
 
-        $priceError = $this->validatePromotionalPrice($data);
-        if ($priceError) {
-            return $priceError;
+        $data['discount_type'] = $this->normalizeDiscountType($data['discount_type']);
+        $discountError = $this->validateDiscountValue(
+            (float) $data['normal_price'],
+            (float) $data['discount_value'],
+            $data['discount_type']
+        );
+        if ($discountError) {
+            return $discountError;
         }
 
-        $data['discount_value'] = $this->discountValueFromPrices(
+        $data['promotional_price'] = $this->promotionalPriceFromDiscount(
             (float) $data['normal_price'],
-            (float) $data['promotional_price'],
+            (float) $data['discount_value'],
             $data['discount_type']
         );
         $data['statut'] = (int) ($data['statut'] ?? 1);
@@ -143,17 +148,25 @@ class ReductionCampaignController extends Controller
             ], 422);
         }
 
-        $priceError = $this->validatePromotionalPrice(array_merge($reductionCampaign->toArray(), $data));
-        if ($priceError) {
-            return $priceError;
+        if (array_key_exists('discount_type', $data)) {
+            $data['discount_type'] = $this->normalizeDiscountType($data['discount_type']);
         }
 
-        if (array_key_exists('normal_price', $data) || array_key_exists('promotional_price', $data) || array_key_exists('discount_type', $data)) {
-            $data['discount_value'] = $this->discountValueFromPrices(
-                (float) ($data['normal_price'] ?? $reductionCampaign->normal_price),
-                (float) ($data['promotional_price'] ?? $reductionCampaign->promotional_price),
-                $data['discount_type'] ?? $reductionCampaign->discount_type
+        if (array_key_exists('normal_price', $data) || array_key_exists('discount_value', $data) || array_key_exists('discount_type', $data)) {
+            $normalPrice = (float) ($data['normal_price'] ?? $reductionCampaign->normal_price);
+            $discountValue = (float) ($data['discount_value'] ?? $reductionCampaign->discount_value);
+            $discountType = $data['discount_type'] ?? $reductionCampaign->discount_type;
+
+            $discountError = $this->validateDiscountValue(
+                $normalPrice,
+                $discountValue,
+                $discountType
             );
+            if ($discountError) {
+                return $discountError;
+            }
+
+            $data['promotional_price'] = $this->promotionalPriceFromDiscount($normalPrice, $discountValue, $discountType);
         }
 
         $imageUpload = $this->uploadCampaignImage($request);
@@ -440,10 +453,10 @@ class ReductionCampaignController extends Controller
             'description' => 'nullable|string',
             'product_or_service' => $required,
             'product_or_service.*' => 'max:200',
-            'discount_type' => [$required, Rule::in(['percentage', 'fixed'])],
-            'discount_value' => 'nullable|numeric|min:0',
+            'discount_type' => [$required, Rule::in(['percentage', 'fixed', 'montant'])],
+            'discount_value' => "{$required}|numeric|min:0",
             'normal_price' => "{$required}|numeric|min:0",
-            'promotional_price' => "{$required}|numeric|min:0",
+            'promotional_price' => 'nullable|numeric|min:0',
             'date_debut' => "{$required}|date",
             'date_fin' => "{$required}|date|after_or_equal:date_debut",
             'quantity_available' => 'nullable|integer|min:1',
@@ -578,19 +591,43 @@ class ReductionCampaignController extends Controller
         ];
     }
 
-    protected function validatePromotionalPrice(array $data)
+    protected function validateDiscountValue(float $normalPrice, float $discountValue, string $discountType)
     {
-        if ((float) $data['promotional_price'] > (float) $data['normal_price']) {
+        if ($discountType === 'percentage' && $discountValue > 100) {
             return response()->json([
                 'success' => false,
-                'message' => 'Le prix promotionnel doit être inférieur ou égal au prix normal.',
+                'message' => 'Le pourcentage de réduction ne peut pas dépasser 100%.',
                 'errors' => [
-                    'promotional_price' => ['Le prix promotionnel doit être inférieur ou égal au prix normal.'],
+                    'discount_value' => ['Le pourcentage de réduction ne peut pas dépasser 100%.'],
+                ],
+            ], 422);
+        }
+
+        if ($discountType === 'fixed' && $discountValue > $normalPrice) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Le montant de réduction ne peut pas dépasser le prix normal.',
+                'errors' => [
+                    'discount_value' => ['Le montant de réduction ne peut pas dépasser le prix normal.'],
                 ],
             ], 422);
         }
 
         return null;
+    }
+
+    protected function normalizeDiscountType(string $discountType): string
+    {
+        return $discountType === 'montant' ? 'fixed' : $discountType;
+    }
+
+    protected function promotionalPriceFromDiscount(float $normalPrice, float $discountValue, string $discountType): float
+    {
+        $discountAmount = $discountType === 'percentage'
+            ? $normalPrice * $discountValue / 100
+            : $discountValue;
+
+        return round(max($normalPrice - min($discountAmount, $normalPrice), 0), 2);
     }
 
     protected function validateCampaignImage($validator, Request $request): void
