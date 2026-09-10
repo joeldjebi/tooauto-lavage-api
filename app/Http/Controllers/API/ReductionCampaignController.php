@@ -648,15 +648,28 @@ class ReductionCampaignController extends Controller
             return;
         }
 
+        $maxImageSize = 2 * 1024 * 1024;
         $allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        $allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
         $mimeType = $file->getMimeType();
+        $extension = strtolower($file->getClientOriginalExtension());
+        $imageInfo = @getimagesize($file->getRealPath());
 
-        if (!in_array($mimeType, $allowedMimeTypes, true)) {
+        if (!$imageInfo) {
+            $validator->errors()->add('image', 'Le fichier envoyé n’est pas une image lisible. Vérifiez que le fichier n’est pas corrompu et qu’il est envoyé en multipart/form-data avec la clé "image".');
+            return;
+        }
+
+        if (!in_array($mimeType, $allowedMimeTypes, true) && $mimeType !== 'application/octet-stream') {
             $validator->errors()->add('image', 'Le fichier envoyé doit être une image JPEG, PNG, WEBP ou GIF. Type détecté: ' . ($mimeType ?: 'inconnu') . '.');
         }
 
-        if ($file->getSize() > 4096 * 1024) {
-            $validator->errors()->add('image', 'L’image ne doit pas dépasser 4 Mo.');
+        if ($mimeType === 'application/octet-stream' && !in_array($extension, $allowedExtensions, true)) {
+            $validator->errors()->add('image', 'Le fichier est reçu avec le type application/octet-stream; son extension doit être jpg, jpeg, png, webp ou gif. Extension détectée: ' . ($extension ?: 'aucune') . '.');
+        }
+
+        if ($file->getSize() > $maxImageSize) {
+            $validator->errors()->add('image', 'L’image ne doit pas dépasser 2 Mo. Taille reçue: ' . round($file->getSize() / 1024 / 1024, 2) . ' Mo.');
         }
     }
 
