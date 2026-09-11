@@ -215,30 +215,67 @@ class ReductionCampaignController extends Controller
         ]);
     }
 
+    // public function active(Request $request)
+    // {
+    //     $validator = Validator::make($request->all(), [
+    //         'establishment_type' => ['required', Rule::in(['etablissement', 'lavage', 'station'])],
+    //         'establishment_id' => 'required|integer|min:1',
+    //     ]);
+
+    //     if ($validator->fails()) {
+    //         return $this->validationError($validator);
+    //     }
+
+    //     $campaign = $this->activeCampaignQuery($request->establishment_type, (int) $request->establishment_id)->first();
+
+    //     if (!$campaign) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Aucune campagne active disponible pour cet établissement.',
+    //         ], 404);
+    //     }
+
+    //     return response()->json([
+    //         'success' => true,
+    //         'message' => 'Campagne active récupérée avec succès.',
+    //         'data' => $this->formatCampaign($campaign),
+    //     ]);
+    // }
+
     public function active(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'establishment_type' => ['required', Rule::in(['etablissement', 'lavage', 'station'])],
             'establishment_id' => 'required|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:100',
         ]);
 
         if ($validator->fails()) {
             return $this->validationError($validator);
         }
 
-        $campaign = $this->activeCampaignQuery($request->establishment_type, (int) $request->establishment_id)->first();
+        $perPage = (int) $request->input('per_page', 20);
 
-        if (!$campaign) {
+        $campaigns = $this->activeCampaignQuery(
+            $request->establishment_type,
+            (int) $request->establishment_id
+        )->paginate($perPage);
+
+        if ($campaigns->getCollection()->isEmpty()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Aucune campagne active disponible pour cet établissement.',
             ], 404);
         }
 
+        $campaigns->getCollection()->transform(function (ReductionCampaign $campaign) {
+            return $this->formatCampaign($campaign);
+        });
+
         return response()->json([
             'success' => true,
-            'message' => 'Campagne active récupérée avec succès.',
-            'data' => $this->formatCampaign($campaign),
+            'message' => 'Campagnes actives récupérées avec succès.',
+            'data' => $campaigns,
         ]);
     }
 
