@@ -95,13 +95,7 @@ class ReductionCampaignController extends Controller
             $data['image'] = $imageUpload['path'];
         }
 
-        $campaign = DB::transaction(function () use ($data) {
-            if ((int) ($data['statut'] ?? 1) === 1) {
-                $this->deactivateOtherCampaigns($data['establishment_type'], (int) $data['establishment_id']);
-            }
-
-            return ReductionCampaign::create($data);
-        });
+        $campaign = ReductionCampaign::create($data);
 
         return response()->json([
             'success' => true,
@@ -183,16 +177,7 @@ class ReductionCampaignController extends Controller
             }
         }
 
-        DB::transaction(function () use ($reductionCampaign, $data) {
-            $establishmentType = $data['establishment_type'] ?? $reductionCampaign->establishment_type;
-            $establishmentId = (int) ($data['establishment_id'] ?? $reductionCampaign->establishment_id);
-
-            if (array_key_exists('statut', $data) && (int) $data['statut'] === 1) {
-                $this->deactivateOtherCampaigns($establishmentType, $establishmentId, $reductionCampaign->id);
-            }
-
-            $reductionCampaign->update($data);
-        });
+        $reductionCampaign->update($data);
 
         return response()->json([
             'success' => true,
@@ -548,15 +533,6 @@ class ReductionCampaignController extends Controller
                     ->orWhereRaw('COALESCE(quantity_used, 0) < quantity_available');
             })
             ->orderByDesc('created_at');
-    }
-
-    protected function deactivateOtherCampaigns(string $establishmentType, int $establishmentId, ?int $exceptId = null): void
-    {
-        ReductionCampaign::where('establishment_type', $establishmentType)
-            ->where('establishment_id', $establishmentId)
-            ->when($exceptId, fn ($query) => $query->where('id', '!=', $exceptId))
-            ->where('statut', 1)
-            ->update(['statut' => 0]);
     }
 
     protected function findValidUserCard(Request $request): array
