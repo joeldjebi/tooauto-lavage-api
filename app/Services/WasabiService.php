@@ -32,7 +32,8 @@ class WasabiService
         $filename = $prefix . '-' . time() . '-' . Str::random(10) . '.' . $file->getClientOriginalExtension();
         $path = $directory . '/' . $filename;
 
-        $this->disk()->putFileAs(
+        $disk = $this->disk();
+        $storedPath = $disk->putFileAs(
             $directory,
             $file,
             $filename,
@@ -40,6 +41,10 @@ class WasabiService
                 'ContentType' => $file->getMimeType(),
             ]
         );
+
+        if ($storedPath === false || !$disk->exists($path)) {
+            throw new \RuntimeException("Le fichier n'a pas pu être enregistré dans Wasabi à l'emplacement {$path}.");
+        }
 
         return $path;
     }

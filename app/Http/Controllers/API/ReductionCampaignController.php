@@ -168,16 +168,29 @@ class ReductionCampaignController extends Controller
             return $this->businessError($imageUpload);
         }
 
+        $oldImage = null;
+
         if ($imageUpload['path']) {
             $oldImage = $reductionCampaign->image;
             $data['image'] = $imageUpload['path'];
-
-            if ($oldImage) {
-                $this->deleteCampaignImage($oldImage);
-            }
         }
 
-        $reductionCampaign->update($data);
+        try {
+            $reductionCampaign->update($data);
+        } catch (\Throwable $e) {
+            if ($imageUpload['path']) {
+                $this->deleteCampaignImage($imageUpload['path']);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'La campagne n’a pas pu être mise à jour. La nouvelle image n’a pas été conservée: ' . $e->getMessage(),
+            ], 500);
+        }
+
+        if ($imageUpload['path'] && $oldImage && $oldImage !== $imageUpload['path']) {
+            $this->deleteCampaignImage($oldImage);
+        }
 
         return response()->json([
             'success' => true,
@@ -650,6 +663,11 @@ class ReductionCampaignController extends Controller
         }
 
         if (!$request->hasFile('image')) {
+            if ($this->hasUnparsedMultipartImage($request)) {
+                $validator->errors()->add('image', 'Le fichier image a été envoyé avec une requête PUT multipart/form-data, mais PHP ne l’a pas chargé. Utilisez POST /api/reduction-campaigns/{id} avec le fichier sous la clé "image" pour mettre à jour la campagne.');
+                return;
+            }
+
             $validator->errors()->add('image', 'Le champ image doit être un fichier envoyé en multipart/form-data avec la clé "image"; les liens, chemins texte et base64 ne sont pas acceptés.');
             return;
         }
@@ -719,7 +737,19 @@ class ReductionCampaignController extends Controller
 
     protected function imageWasSent(Request $request): bool
     {
-        return $request->hasFile('image') || $request->files->has('image') || $request->has('image');
+        return $request->hasFile('image')
+            || $request->files->has('image')
+            || $request->has('image')
+            || $this->hasUnparsedMultipartImage($request);
+    }
+
+    protected function hasUnparsedMultipartImage(Request $request): bool
+    {
+        if (!$request->isMethod('put') || !str_contains(strtolower((string) $request->header('Content-Type')), 'multipart/form-data')) {
+            return false;
+        }
+
+        return str_contains($request->getContent(), 'name="image"');
     }
 
     protected function deleteCampaignImage(string $path): void

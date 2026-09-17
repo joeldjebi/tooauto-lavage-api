@@ -140,6 +140,17 @@ Le fichier est enregistre sous `reduction-campaigns/campaign-...`. La base conse
 
 Lors d'un remplacement, la nouvelle image est envoyee puis l'ancienne est supprimee. L'echec silencieux de suppression de l'ancien fichier ne bloque pas la mise a jour.
 
+Pour remplacer une image, utiliser `POST /api/reduction-campaigns/{id}` en `multipart/form-data`. Une requete `PUT multipart/form-data` native peut ne pas alimenter les fichiers PHP; le controleur detecte ce cas et retourne maintenant une erreur explicite au lieu de conserver silencieusement l'ancienne image.
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/reduction-campaigns/12" \
+  -H "Authorization: Bearer TOKEN" \
+  -H "Accept: application/json" \
+  -F "image=@/chemin/nouvelle-image.jpg"
+```
+
+`WasabiService::uploadFile()` verifie le resultat de l'ecriture et l'existence du fichier distant avant de retourner son chemin. Le controleur met ensuite le nouveau chemin en base, puis supprime l'ancienne image. Si la mise a jour SQL echoue, la nouvelle image est supprimee et l'ancienne reference est preservee.
+
 ## Campagnes actives
 
 `activeCampaignQuery()` considere une campagne utilisable lorsque:
