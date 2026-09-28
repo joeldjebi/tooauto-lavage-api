@@ -9,6 +9,7 @@ use App\Http\Controllers\API\AsignQrCodeController;
 use App\Http\Controllers\API\UsagerController;
 use App\Http\Controllers\API\ReductionCardController;
 use App\Http\Controllers\API\ReductionCampaignController;
+use App\Http\Controllers\API\FcmTokenController;
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -22,6 +23,12 @@ Route::prefix('auth')->group(function () {
         Route::post('/update', [AuthController::class, 'update']);
         Route::post('/update-password', [AuthController::class, 'updatePassword']);
     });
+});
+
+Route::prefix('notifications/fcm-tokens')->middleware('auth:api')->group(function () {
+    Route::get('/', [FcmTokenController::class, 'index']);
+    Route::post('/', [FcmTokenController::class, 'store']);
+    Route::delete('/', [FcmTokenController::class, 'destroy']);
 });
 
 // Routes pour les stations de lavage

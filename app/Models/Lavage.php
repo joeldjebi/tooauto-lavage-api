@@ -84,4 +84,9 @@ class Lavage extends Authenticatable implements JWTSubject
         return $this->belongsToMany(AttributionVehicule::class, 'attribution_vehicule_laveur', 'laveur_id', 'attribution_vehicule_id')
             ->withTimestamps();
     }
+
+    public function fcmTokens()
+    {
+        return $this->hasMany(LavageFcmToken::class, 'lavage_id');
+    }
 }
