@@ -15,10 +15,9 @@ use App\Models\Lavage;
 use App\Models\Vehicule;
 use App\Models\AttributionVehicule;
 use App\Models\Type_lavage;
-use App\Models\Fidelite;
-use App\Models\Recompense;
 use App\Services\SmsService;
 use App\Services\WasabiService;
+use App\Services\FideliteService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
@@ -26,7 +25,8 @@ class AuthController extends Controller
 {
     public function __construct(
         protected SmsService $smsService,
-        protected WasabiService $wasabiService
+        protected WasabiService $wasabiService,
+        protected FideliteService $fideliteService
     ) {}
 
     public function login(Request $request)
@@ -1387,56 +1387,33 @@ class AuthController extends Controller
 
             DB::beginTransaction();
             try {
+                $lockedAttribution = AttributionVehicule::whereKey($attributionId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$lockedAttribution || $lockedAttribution->statut !== 'en_cours') {
+                    DB::rollBack();
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Cette attribution a déjà été terminée ou n’est plus disponible.',
+                    ], 409);
+                }
+
+                $attribution = $lockedAttribution->load(['laveur', 'laveurs', 'vehicule', 'typeLavage']);
+
                 // Marquer comme terminé
                 $attribution->statut = 'termine';
                 $attribution->date_fin = now();
                 $attribution->save();
 
-                // Ajouter une case à la carte de fidélité
-                $fidelite = Fidelite::where('usager_id', $attribution->vehicule->user_id)
-                                   ->where('station_lavage_id', $stationLavage->id)
-                                   ->where('lavage_id', $manager->id)
-                                   ->where('matricule_vehicule', $attribution->matricule_vehicule)
-                                   ->first();
-
-                if (!$fidelite) {
-                    $fidelite = Fidelite::create([
-                        'usager_id' => $attribution->vehicule->user_id,
-                        'lavage_id' => $manager->id,
-                        'matricule_vehicule' => $attribution->matricule_vehicule,
-                        'cases_remplies' => 0,
-                        'total_cases' => 10,
-                        'recompenses_gagnees' => 0,
-                        'derniere_recompense' => null,
-                        'station_lavage_id' => $stationLavage->id
-                    ]);
-                }
-
-                $fidelite->cases_remplies++;
-                $fidelite->save();
-
-                // Vérifier si une récompense doit être attribuée
-                $recompenseAttribuee = false;
-                if ($fidelite->isCarteComplete()) {
-                    $recompense = Recompense::create([
-                        'usager_id' => $attribution->vehicule->user_id,
-                        'lavage_id' => $manager->id,
-                        'matricule_vehicule' => $attribution->matricule_vehicule,
-                        'type_recompense' => 'lavage_gratuit',
-                        'description' => 'Récompense pour fidélité - Carte complète',
-                        'valeur' => 0.00,
-                        'statut' => 'attribuee',
-                        'date_attribution' => now(),
-                        'utilisee' => false
-                    ]);
-
-                    $fidelite->recompenses_gagnees++;
-                    $fidelite->derniere_recompense = now();
-                    $fidelite->cases_remplies = 0; // Reset pour nouvelle carte
-                    $fidelite->save();
-
-                    $recompenseAttribuee = true;
-                }
+                $fideliteResult = $this->fideliteService->recordCompletedAttribution(
+                    $attribution,
+                    $manager,
+                    $stationLavage
+                );
+                $fidelite = $fideliteResult['fidelite'];
+                $recompenseAttribuee = $fideliteResult['recompense_attribuee'];
 
                 // Log de l'action
                 \Log::info('Lavage terminé', [
@@ -1463,10 +1440,14 @@ class AuthController extends Controller
                         'duree' => $attribution->date_debut->diffInMinutes($attribution->date_fin) . ' minutes'
                     ],
                     'fidelite' => [
+                        'carte_id' => $fidelite->id,
+                        'carte_complete_id' => $fideliteResult['completed_card']?->id,
                         'cases_remplies' => $fidelite->cases_remplies,
                         'total_cases' => $fidelite->total_cases,
+                        'cases_restantes' => $fidelite->getCasesRestantes(),
                         'pourcentage' => $fidelite->getProgressionPourcentage(),
-                        'recompense_attribuee' => $recompenseAttribuee
+                        'recompense_attribuee' => $recompenseAttribuee,
+                        'nouvelle_carte' => $recompenseAttribuee,
                     ]
                 ], 200);
 

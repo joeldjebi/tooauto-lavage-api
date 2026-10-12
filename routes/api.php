@@ -67,6 +67,8 @@ Route::prefix('fidelite')->middleware('auth:api')->group(function () {
 
 // Routes pour la carte de fidélité (nouveau système)
 Route::prefix('carte-fidelite')->middleware('auth:api')->group(function () {
+    Route::get('/configuration', [FideliteController::class, 'getConfigurationFidelite']);
+    Route::put('/configuration', [FideliteController::class, 'updateConfigurationFidelite']);
     Route::post('/add-case', [FideliteController::class, 'addCase']);
     Route::post('/verifier-immatriculation', [FideliteController::class, 'verifierImmatriculationScannee']);
     Route::get('/carte/{usager_id}', [FideliteController::class, 'getCarteFidelite']);

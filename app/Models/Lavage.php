@@ -21,7 +21,8 @@ class Lavage extends Authenticatable implements JWTSubject
         'password',
         'role',
         'statut',
-        'created_by'
+        'created_by',
+        'fidelite_total_cases'
     ];
 
     protected $hidden = [
@@ -34,6 +35,7 @@ class Lavage extends Authenticatable implements JWTSubject
         'password' => 'hashed',
         'role' => 'integer',
         'statut' => 'integer',
+        'fidelite_total_cases' => 'integer',
     ];
 
     // Méthode pour l'authentification par mobile

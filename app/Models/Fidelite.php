@@ -19,14 +19,17 @@ class Fidelite extends Model
         'total_cases',
         'recompenses_gagnees',
         'derniere_recompense',
-        'station_lavage_id'
+        'station_lavage_id',
+        'statut',
+        'completed_at'
     ];
 
     protected $casts = [
         'cases_remplies' => 'integer',
         'total_cases' => 'integer',
         'recompenses_gagnees' => 'integer',
-        'derniere_recompense' => 'datetime'
+        'derniere_recompense' => 'datetime',
+        'completed_at' => 'datetime'
     ];
 
     public function usager()
@@ -42,6 +45,11 @@ class Fidelite extends Model
     public function vehicule()
     {
         return $this->belongsTo(Vehicule::class, 'matricule_vehicule', 'matricule');
+    }
+
+    public function passages()
+    {
+        return $this->hasMany(FidelitePassage::class, 'fidelite_id')->orderBy('used_at');
     }
 
     /**

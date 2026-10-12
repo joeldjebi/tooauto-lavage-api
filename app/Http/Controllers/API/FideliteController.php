@@ -10,6 +10,7 @@ use App\Models\Recompense;
 use App\Models\StationLavage;
 use App\Models\Lavage;
 use App\Models\AttributionVehicule;
+use App\Services\FideliteService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
@@ -17,11 +18,65 @@ use Illuminate\Support\Facades\DB;
 
 class FideliteController extends Controller
 {
+    public function __construct(protected FideliteService $fideliteService)
+    {
+    }
+
+    public function getConfigurationFidelite()
+    {
+        $manager = $this->resolveLoyaltyManager();
+        if (!$manager) {
+            return response()->json(['success' => false, 'message' => 'Compte lavage introuvable.'], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'nombre_lavages_requis' => (int) ($manager->fidelite_total_cases ?: 10),
+            ],
+        ]);
+    }
+
+    public function updateConfigurationFidelite(Request $request)
+    {
+        $lavage = auth('api')->user();
+        if (!$lavage || (int) $lavage->role !== 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Seul le manager du lavage peut modifier le seuil de fidélité.',
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'nombre_lavages_requis' => 'required|integer|min:1|max:100',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation échouée.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $lavage->fidelite_total_cases = (int) $request->nombre_lavages_requis;
+        $lavage->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Configuration de fidélité mise à jour. Elle s’appliquera aux nouvelles cartes.',
+            'data' => [
+                'nombre_lavages_requis' => $lavage->fidelite_total_cases,
+            ],
+        ]);
+    }
+
     public function addCase(Request $request)
     {
         try {
             $validator = Validator::make($request->all(), [
                 'qrcode' => 'required|string|max:20',
+                'attribution_id' => 'nullable|integer|exists:attribution_vehicules,id',
             ], [
                 'qrcode.required' => 'Le QR code du véhicule est requis.',
                 'qrcode.string' => 'Le QR code doit être une chaîne de caractères.',
@@ -69,89 +124,77 @@ class FideliteController extends Controller
                 ], 404);
             }
 
-            DB::beginTransaction();
-            try {
-                // Rechercher ou créer une entrée de fidélité pour cet usager, ce lavage et ce véhicule
-                $fidelite = Fidelite::firstOrNew([
-                    'usager_id' => $usager->id,
-                    'lavage_id' => $lavage->id,
-                    'matricule_vehicule' => $vehicule->matricule
-                ]);
-
-                // Initialiser les valeurs par défaut si c'est une nouvelle entrée
-                if (!$fidelite->exists) {
-                    $fidelite->cases_remplies = 0;
-                    $fidelite->total_cases = 10; // Par défaut 10 cases
-                    $fidelite->recompenses_gagnees = 0;
-                }
-
-                // Ajouter une case
-                $fidelite->cases_remplies++;
-
-                // Vérifier si la carte est complète
-                $recompenseGagnee = false;
-                $recompenseAttribuee = null;
-
-                if ($fidelite->isCarteComplete()) {
-                    $fidelite->recompenses_gagnees++;
-                    $fidelite->derniere_recompense = now();
-                    $fidelite->cases_remplies = 0; // Réinitialiser pour la prochaine carte
-                    $recompenseGagnee = true;
-
-                    // Attribuer une récompense
-                    $recompenseAttribuee = $this->attribuerRecompense($usager, $lavage, $vehicule);
-                }
-
-                $fidelite->save();
-
-                DB::commit();
-
-                $message = $recompenseGagnee
-                    ? 'Félicitations ! Votre carte de fidélité est complète. Vous avez gagné une récompense !'
-                    : 'Case ajoutée avec succès à votre carte de fidélité.';
-
-                $response = [
-                    'success' => true,
-                    'message' => $message,
-                    'fidelite' => $fidelite,
-                    'recompense_gagnee' => $recompenseGagnee,
-                    'progression' => [
-                        'cases_remplies' => $fidelite->cases_remplies,
-                        'total_cases' => $fidelite->total_cases,
-                        'cases_restantes' => $fidelite->getCasesRestantes(),
-                        'pourcentage' => $fidelite->getProgressionPourcentage()
-                    ],
-                    'usager' => [
-                        'id' => $usager->id,
-                        'nom' => $usager->nom,
-                        'prenoms' => $usager->prenoms
-                    ],
-                    'vehicule' => [
-                        'matricule' => $vehicule->matricule,
-                        'marque' => $vehicule->marque->libelle ?? 'Non spécifiée',
-                        'modele' => $vehicule->modele ?? 'Non spécifié'
-                    ]
-                ];
-
-                // Ajouter les détails de la récompense si elle a été attribuée
-                if ($recompenseAttribuee) {
-                    $response['recompense'] = [
-                        'id' => $recompenseAttribuee->id,
-                        'type' => $recompenseAttribuee->type_recompense,
-                        'type_nom' => $recompenseAttribuee->type_name,
-                        'description' => $recompenseAttribuee->description,
-                        'valeur' => $recompenseAttribuee->valeur,
-                        'date_attribution' => $recompenseAttribuee->date_attribution
-                    ];
-                }
-
-                return response()->json($response, 200);
-
-            } catch (\Exception $e) {
-                DB::rollBack();
-                Log::error('Erreur lors de l\'ajout de la case', ['error' => $e->getMessage()]);
-                throw $e;
+            $manager = $this->resolveLoyaltyManager();
+            $station = $manager ? StationLavage::where('created_by', $manager->id)->first() : null;
+            if (!$manager || !$station) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Station de lavage introuvable pour ce compte.',
+                ], 404);
             }
+
+            $attribution = null;
+            if ($request->filled('attribution_id')) {
+                $attribution = AttributionVehicule::where('id', $request->attribution_id)
+                    ->where('manager_id', $manager->id)
+                    ->where('station_lavage_id', $station->id)
+                    ->where('matricule_vehicule', $vehicule->matricule)
+                    ->where('statut', 'termine')
+                    ->first();
+
+                if (!$attribution) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Attribution terminée introuvable pour ce véhicule et ce lavage.',
+                    ], 404);
+                }
+            } else {
+                $attribution = AttributionVehicule::where('manager_id', $manager->id)
+                    ->where('station_lavage_id', $station->id)
+                    ->where('matricule_vehicule', $vehicule->matricule)
+                    ->where('statut', 'termine')
+                    ->whereDate('date_fin', now()->toDateString())
+                    ->latest('date_fin')
+                    ->first();
+            }
+
+            if ($attribution) {
+                $result = $this->fideliteService->recordCompletedAttribution($attribution->load('vehicule'), $manager, $station);
+            } else {
+                $result = $this->fideliteService->recordManualPassage($usager, $manager, $station, $vehicule);
+            }
+
+            $fidelite = $result['fidelite'];
+            $recompenseGagnee = $result['recompense_attribuee'];
+            $response = [
+                'success' => true,
+                'message' => $result['already_recorded']
+                    ? 'Ce lavage a déjà été comptabilisé sur la carte de fidélité.'
+                    : ($recompenseGagnee
+                        ? 'Félicitations ! Votre carte est complète. Une récompense a été attribuée et une nouvelle carte est ouverte.'
+                        : 'Passage ajouté à la carte de fidélité.'),
+                'fidelite' => $fidelite,
+                'recompense_gagnee' => $recompenseGagnee,
+                'already_recorded' => $result['already_recorded'],
+                'progression' => [
+                    'cases_remplies' => $fidelite->cases_remplies,
+                    'total_cases' => $fidelite->total_cases,
+                    'cases_restantes' => $fidelite->getCasesRestantes(),
+                    'pourcentage' => $fidelite->getProgressionPourcentage(),
+                ],
+                'usager' => ['id' => $usager->id, 'nom' => $usager->nom, 'prenoms' => $usager->prenoms],
+                'vehicule' => [
+                    'matricule' => $vehicule->matricule,
+                    'marque' => $vehicule->marque->libelle ?? 'Non spécifiée',
+                    'modele' => $vehicule->modele ?? 'Non spécifié',
+                ],
+            ];
+
+            if ($recompenseGagnee) {
+                $response['carte_complete_id'] = $result['completed_card']->id;
+            }
+
+            return response()->json($response);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -162,30 +205,18 @@ class FideliteController extends Controller
         }
     }
 
-    /**
-     * Attribuer une récompense à un usager
-     */
-    private function attribuerRecompense($usager, $lavage, $vehicule)
+    protected function resolveLoyaltyManager(): ?Lavage
     {
-        // Par défaut, attribuer un lavage gratuit
-        $typeRecompense = 'lavage_gratuit';
-        $description = 'Lavage gratuit offert pour avoir complété votre carte de fidélité';
-        $valeur = 0.00;
+        $lavage = auth('api')->user();
+        if (!$lavage) {
+            return null;
+        }
 
-        // Créer la récompense
-        $recompense = Recompense::create([
-            'usager_id' => $usager->id,
-            'lavage_id' => $lavage->id,
-            'matricule_vehicule' => $vehicule->matricule,
-            'type_recompense' => $typeRecompense,
-            'description' => $description,
-            'valeur' => $valeur,
-            'statut' => 'attribuee',
-            'date_attribution' => now(),
-            'utilisee' => false
-        ]);
+        if ((int) $lavage->role === 1) {
+            return $lavage;
+        }
 
-        return $recompense;
+        return Lavage::find($lavage->created_by) ?? $lavage;
     }
 
     public function getCarteFidelite($usager_id, $matricule_vehicule = null)
@@ -210,8 +241,15 @@ class FideliteController extends Controller
             }
 
             // Construire la requête de base
-            $query = Fidelite::where('usager_id', $usager_id)
-                           ->where('lavage_id', $lavage->id);
+            $manager = $this->resolveLoyaltyManager();
+            $station = $manager ? StationLavage::where('created_by', $manager->id)->first() : null;
+            $query = Fidelite::with('passages.typeLavage')
+                           ->where('usager_id', $usager_id)
+                           ->where('lavage_id', $manager?->id ?? $lavage->id)
+                           ->when($station, fn ($query) => $query->where(function ($scope) use ($station) {
+                               $scope->where('station_lavage_id', $station->id)->orWhereNull('station_lavage_id');
+                           }))
+                           ->orderByDesc('id');
 
             // Si un matricule est spécifié, filtrer par véhicule
             if ($matricule_vehicule) {
@@ -240,6 +278,7 @@ class FideliteController extends Controller
             // Formater les cartes de fidélité
             $cartes = $fidelites->map(function ($fidelite) {
                 return [
+                    'id' => $fidelite->id,
                     'matricule_vehicule' => $fidelite->matricule_vehicule,
                     'cases_remplies' => $fidelite->cases_remplies,
                     'total_cases' => $fidelite->total_cases,
@@ -247,7 +286,17 @@ class FideliteController extends Controller
                     'pourcentage' => $fidelite->getProgressionPourcentage(),
                     'recompenses_gagnees' => $fidelite->recompenses_gagnees,
                     'derniere_recompense' => $fidelite->derniere_recompense,
-                    'carte_complete' => $fidelite->isCarteComplete()
+                    'carte_complete' => $fidelite->statut === 'complete',
+                    'statut' => $fidelite->statut ?? 'en_cours',
+                    'completed_at' => $fidelite->completed_at,
+                    'passages' => $fidelite->passages->map(fn ($passage) => [
+                        'id' => $passage->id,
+                        'attribution_id' => $passage->attribution_vehicule_id,
+                        'type_lavage_id' => $passage->type_lavage_id,
+                        'prestation' => $passage->typeLavage?->libelle,
+                        'source' => $passage->source,
+                        'date' => $passage->used_at,
+                    ])->values(),
                 ];
             });
 
@@ -284,7 +333,9 @@ class FideliteController extends Controller
             // Récupérer tous les usagers fidèles pour ce lavage
             $usagersFideles = Fidelite::with('usager')
                                     ->whereHas('usager')
-                                    ->where('lavage_id', $lavage->id)
+                                    ->where('lavage_id', $this->resolveLoyaltyManager()?->id ?? $lavage->id)
+                                    ->orderByRaw("CASE WHEN statut = 'en_cours' THEN 0 ELSE 1 END")
+                                    ->orderByDesc('id')
                                     ->orderBy('cases_remplies', 'desc')
                                     ->orderBy('recompenses_gagnees', 'desc')
                                     ->get();
@@ -311,7 +362,9 @@ class FideliteController extends Controller
                             'total_cases' => $fidelite->total_cases,
                             'cases_restantes' => $fidelite->getCasesRestantes(),
                             'pourcentage' => $fidelite->getProgressionPourcentage(),
-                            'carte_complete' => $fidelite->isCarteComplete()
+                            'carte_complete' => $fidelite->statut === 'complete',
+                            'statut' => $fidelite->statut ?? 'en_cours',
+                            'carte_id' => $fidelite->id,
                         ],
                         'recompenses_gagnees' => $fidelite->recompenses_gagnees
                     ];
@@ -364,8 +417,9 @@ class FideliteController extends Controller
             }
 
             // Construire la requête de base
+            $manager = $this->resolveLoyaltyManager();
             $query = Fidelite::where('usager_id', $usager_id)
-                           ->where('lavage_id', $lavage->id);
+                           ->where('lavage_id', $manager?->id ?? $lavage->id);
 
             // Si un matricule est spécifié, filtrer par véhicule
             if ($matricule_vehicule) {
@@ -385,7 +439,7 @@ class FideliteController extends Controller
                     'recompenses' => [
                         'total_gagnees' => 0,
                         'derniere_recompense' => null,
-                        'prochaine_recompense' => '10 cases restantes'
+                        'prochaine_recompense' => (int) ($manager?->fidelite_total_cases ?: 10) . ' cases restantes'
                     ],
                     'usager' => [
                         'id' => $usager->id,
@@ -398,7 +452,7 @@ class FideliteController extends Controller
             // Calculer les totaux
             $totalRecompenses = $fidelites->sum('recompenses_gagnees');
             $derniereRecompense = $fidelites->max('derniere_recompense');
-            $casesRestantes = $fidelites->sum(function ($fidelite) {
+            $casesRestantes = $fidelites->where('statut', '!=', 'complete')->sum(function ($fidelite) {
                 return $fidelite->getCasesRestantes();
             });
 
@@ -638,21 +692,28 @@ class FideliteController extends Controller
             }
 
             // Vérifier la carte de fidélité
+            $manager = $this->resolveLoyaltyManager() ?? $lavage;
+            $station = StationLavage::where('created_by', $manager->id)->first();
             $fidelite = Fidelite::where('usager_id', $usager->id)
-                               ->where('lavage_id', $lavage->id)
+                               ->where('lavage_id', $manager->id)
                                ->where('matricule_vehicule', $vehicule->matricule)
+                               ->where('statut', 'en_cours')
+                               ->when($station, fn ($query) => $query->where('station_lavage_id', $station->id))
+                               ->latest('id')
                                ->first();
 
             // Si pas de carte de fidélité, en créer une
             if (!$fidelite) {
                 $fidelite = Fidelite::create([
                     'usager_id' => $usager->id,
-                    'lavage_id' => $lavage->id,
+                    'lavage_id' => $manager->id,
+                    'station_lavage_id' => $station?->id,
                     'matricule_vehicule' => $vehicule->matricule,
                     'cases_remplies' => 0,
-                    'total_cases' => 10,
+                    'total_cases' => max(1, (int) ($manager->fidelite_total_cases ?: 10)),
                     'recompenses_gagnees' => 0,
-                    'derniere_recompense' => null
+                    'derniere_recompense' => null,
+                    'statut' => 'en_cours',
                 ]);
             }
 
@@ -677,7 +738,7 @@ class FideliteController extends Controller
                 // Créer la récompense
                 $recompense = Recompense::create([
                     'usager_id' => $usager->id,
-                    'lavage_id' => $lavage->id,
+                    'lavage_id' => $manager->id,
                     'matricule_vehicule' => $vehicule->matricule,
                     'type_recompense' => $request->type_recompense,
                     'description' => $request->description ?? 'Récompense attribuée manuellement',
@@ -687,12 +748,24 @@ class FideliteController extends Controller
                     'utilisee' => false
                 ]);
 
-                // Si c'est une attribution normale (carte complète), mettre à jour la fidélité
+                // Une carte complète est conservée; les passages suivants commencent sur une nouvelle carte.
                 if ($fidelite->isCarteComplete()) {
+                    $fidelite->statut = 'complete';
+                    $fidelite->completed_at = now();
                     $fidelite->recompenses_gagnees++;
                     $fidelite->derniere_recompense = now();
-                    $fidelite->cases_remplies = 0; // Reset pour la prochaine carte
                     $fidelite->save();
+
+                    Fidelite::create([
+                        'usager_id' => $usager->id,
+                        'lavage_id' => $manager->id,
+                        'station_lavage_id' => $station?->id,
+                        'matricule_vehicule' => $vehicule->matricule,
+                        'cases_remplies' => 0,
+                        'total_cases' => $fidelite->total_cases,
+                        'recompenses_gagnees' => 0,
+                        'statut' => 'en_cours',
+                    ]);
                 }
 
                 DB::commit();
@@ -1125,6 +1198,10 @@ class FideliteController extends Controller
                 || $attributions->isNotEmpty();
 
             $totalLavagesFidelite = $fidelites->sum(function ($fidelite) {
+                if ($fidelite->statut === 'complete') {
+                    return $fidelite->cases_remplies;
+                }
+
                 return ($fidelite->recompenses_gagnees * $fidelite->total_cases) + $fidelite->cases_remplies;
             });
 
