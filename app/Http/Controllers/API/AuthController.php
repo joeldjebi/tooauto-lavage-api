@@ -1354,6 +1354,30 @@ class AuthController extends Controller
                 ], 403);
             }
 
+            $validator = Validator::make($request->all(), [
+                'mode_paiement' => ['required', Rule::in(['espece', 'mobile_money'])],
+                'operateur_paiement' => [
+                    'nullable',
+                    'required_if:mode_paiement,mobile_money',
+                    'prohibited_unless:mode_paiement,mobile_money',
+                    Rule::in(['OM', 'MTN', 'MOOV', 'WAVE', 'CB']),
+                ],
+            ], [
+                'mode_paiement.required' => 'Le moyen de paiement est obligatoire.',
+                'mode_paiement.in' => 'Le moyen de paiement doit être espece ou mobile_money.',
+                'operateur_paiement.required_if' => 'L’opérateur est obligatoire pour un paiement mobile money.',
+                'operateur_paiement.prohibited_unless' => 'L’opérateur ne doit être renseigné que pour mobile_money.',
+                'operateur_paiement.in' => 'L’opérateur doit être OM, MTN, MOOV, WAVE ou CB.',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Données de paiement invalides.',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
             $stationLavage = StationLavage::where('created_by', $manager->id)->first();
             if (!$stationLavage) {
                 return response()->json([
@@ -1405,6 +1429,10 @@ class AuthController extends Controller
                 // Marquer comme terminé
                 $attribution->statut = 'termine';
                 $attribution->date_fin = now();
+                $attribution->mode_paiement = $request->mode_paiement;
+                $attribution->operateur_paiement = $request->mode_paiement === 'mobile_money'
+                    ? $request->operateur_paiement
+                    : null;
                 $attribution->save();
 
                 $fideliteResult = $this->fideliteService->recordCompletedAttribution(
@@ -1437,7 +1465,9 @@ class AuthController extends Controller
                         ...$this->formatTypeLavageFields($attribution->typeLavage, $attribution->type_lavage_id),
                         'date_debut' => $attribution->date_debut,
                         'date_fin' => $attribution->date_fin,
-                        'duree' => $attribution->date_debut->diffInMinutes($attribution->date_fin) . ' minutes'
+                        'duree' => $attribution->date_debut->diffInMinutes($attribution->date_fin) . ' minutes',
+                        'mode_paiement' => $attribution->mode_paiement,
+                        'operateur_paiement' => $attribution->operateur_paiement,
                     ],
                     'fidelite' => [
                         'carte_id' => $fidelite->id,

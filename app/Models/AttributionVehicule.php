@@ -21,7 +21,9 @@ class AttributionVehicule extends Model
         'date_attribution',
         'date_debut',
         'date_fin',
-        'station_lavage_id'
+        'station_lavage_id',
+        'mode_paiement',
+        'operateur_paiement'
     ];
 
     protected $casts = [

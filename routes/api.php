@@ -46,7 +46,7 @@ Route::prefix('stations-lavage')->middleware('auth:api')->group(function () {
     Route::put('/{id}', [StationLavageController::class, 'update'])->whereNumber('id');
     Route::delete('/{id}', [StationLavageController::class, 'destroy'])->whereNumber('id');
 
-    Route::post('/register-usager', [UsagerController::class, 'registerUsager']);
+    Route::post('/register-usager', [StationLavageController::class, 'registerUsager']);
     Route::get('/usagers', [UsagerController::class, 'getUsagerByStation']);
 });
 

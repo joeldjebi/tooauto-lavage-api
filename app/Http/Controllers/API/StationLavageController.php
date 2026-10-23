@@ -565,13 +565,23 @@ class StationLavageController extends Controller
 
     public function registerUsager(Request $request)
 	{
-		// Validation des données d'entrée
 		$validator = Validator::make($request->all(), [
-			'indicatif' => 'required|string',
-			'nom' => 'required|string',
-			'prenoms' => 'required|string',
-			'mobile' => 'required|numeric|unique:users',
-			'is_whatsapp' => 'required|numeric'
+			'immatriculation' => 'required|string|unique:vehicules,matricule',
+			'indicatif' => 'nullable|string|max:10',
+			'nom' => 'nullable|string|max:255',
+			'prenoms' => 'nullable|string|max:255',
+			'mobile' => 'nullable|numeric|unique:users,mobile',
+			'is_whatsapp' => 'nullable|boolean',
+			'carte_grise' => 'nullable|string|unique:vehicules,carte_grise',
+			'type_de_vehicule_id' => 'nullable|exists:type_de_vehicules,id',
+			'marque_id' => 'nullable|exists:marques,id',
+			'type_de_carburant_id' => 'nullable|exists:type_de_carburants,id',
+			'couleur' => 'nullable|string|max:50',
+			'modele' => 'nullable|string|max:255',
+		], [
+			'immatriculation.required' => 'L’immatriculation du véhicule est obligatoire.',
+			'immatriculation.unique' => 'Un véhicule est déjà enregistré avec cette immatriculation.',
+			'mobile.unique' => 'Ce numéro de téléphone est déjà utilisé.',
 		]);
 
 		if ($validator->fails()) {
@@ -582,11 +592,7 @@ class StationLavageController extends Controller
 			], 422);
 		}
 
-		// Utilisation d'une transaction pour garantir l'intégrité des données
-		DB::beginTransaction();
 		try {
-			$rawPassword = strval(random_int(100000, 999999));
-
 			$lavage = auth('api')->user();
 
 			if (!$lavage) {
@@ -596,10 +602,11 @@ class StationLavageController extends Controller
 				], 401);
 			}
 
-			// Recherche de la station de lavage avec logging
-			Log::info('Recherche de la station de lavage', ['lavage_id' => $lavage->id]);
-			$stationDeLavage = StationLavage::where('created_by', $lavage->id)->first();
-			Log::info('Résultat de la recherche', ['station' => $stationDeLavage]);
+			$stationOwnerIds = collect([$lavage->id, $lavage->created_by])
+				->filter()
+				->unique()
+				->values();
+			$stationDeLavage = StationLavage::whereIn('created_by', $stationOwnerIds)->first();
 
 			if (!$stationDeLavage) {
 				return response()->json([
@@ -608,68 +615,75 @@ class StationLavageController extends Controller
 				], 404);
 			}
 
-			// Récupération du code parrain de la station
 			$parrain = Parrain::where('station_de_lavage_id', $stationDeLavage->id)->first();
-			if (!$parrain) {
-				return response()->json([
-					'status' => 'error',
-					'message' => 'Aucun code parrain trouvé pour cette station.'
-				], 422);
+			$rawPassword = (string) random_int(100000, 999999);
+			[$user, $vehicule] = DB::transaction(function () use ($request, $lavage, $stationDeLavage, $parrain, $rawPassword) {
+				$user = new User();
+				$user->uuid = (string) Str::uuid();
+				$user->indicatif = $request->input('indicatif');
+				$user->mobile = $request->input('mobile');
+				$user->nom = $request->input('nom');
+				$user->prenoms = $request->input('prenoms');
+				$user->password = bcrypt($rawPassword);
+				$user->is_whatsapp = $request->boolean('is_whatsapp');
+				$user->lavage_id = $lavage->id;
+				$user->station_de_lavage_id = $stationDeLavage->id;
+				$user->save();
+
+				$vehicule = new Vehicule();
+				$vehicule->matricule = $request->immatriculation;
+				$vehicule->carte_grise = $request->input('carte_grise');
+				$vehicule->type_de_vehicule_id = $request->input('type_de_vehicule_id');
+				$vehicule->marque_id = $request->input('marque_id');
+				$vehicule->type_de_carburant_id = $request->input('type_de_carburant_id');
+				$vehicule->couleur = $request->input('couleur');
+				$vehicule->modele = $request->input('modele');
+				$vehicule->user_id = $user->id;
+				$vehicule->created_by = $lavage->id;
+				$vehicule->save();
+
+				if ($parrain) {
+					ReferralCode::create([
+						'user_id' => $user->id,
+						'code' => $parrain->code,
+					]);
+				}
+
+				return [$user, $vehicule];
+			});
+
+			$credentialsSent = false;
+			if ($request->filled('indicatif') && $request->filled('mobile')) {
+				$mobileWithIndicatif = $request->indicatif . $request->mobile;
+				$parrainLine = $parrain ? "\nCode parrain : {$parrain->code}" : '';
+				$message = strtoupper(
+					"Votre compte a ete cree avec succes\n" .
+					"Voici vos identifiants de connexion :\n" .
+					"Numero de telephone : $mobileWithIndicatif\n" .
+					"Mot de passe : $rawPassword" . $parrainLine
+				);
+				$smsResponse = $this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
+				$credentialsSent = $smsResponse->getStatusCode() === 200;
 			}
-
-			// Création de l'utilisateur
-			$user = new User();
-			$user->uuid = (string) Str::uuid();
-			$user->indicatif = $request->indicatif;
-			$user->mobile = $request->mobile;
-			$user->nom = $request->nom;
-			$user->prenoms = $request->prenoms;
-			$user->password = bcrypt($rawPassword);
-			$user->is_whatsapp = $request->is_whatsapp;
-			$user->lavage_id = $lavage->id;
-			$user->station_de_lavage_id = $stationDeLavage->id;
-
-			$user->save();
-
-			// Enregistrement du code de parrainage utilisé
-			ReferralCode::create([
-				'user_id' => $user->id,
-				'code' => $parrain->code
-			]);
-
-			// Commit de la transaction
-			DB::commit();
-
-			$mobileWithIndicatif = $request->indicatif . $request->mobile;
-			$password = $rawPassword;
-
-			// Construire le message
-			$message = strtoupper(
-				"Votre compte a ete cree avec succes\n" .
-				"Voici vos identifiants de connexion :\n" .
-				"Numero de telephone : $mobileWithIndicatif\n" .
-				"Mot de passe : $password\n" .
-				"Code parrain : " . $parrain->code
-			);
-
-			// Envoyer le SMS
-			$smsResponse = $this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
 
 			return response()->json([
 				'success' => true,
-				'message' => 'Utilisateur enregistré avec succès.',
+				'message' => 'Usager et véhicule enregistrés avec succès.',
 				'user' => $user,
-				'parrain' => $parrain
+				'vehicule' => $vehicule,
+				'parrain' => $parrain,
+				'identifiants_envoyes_par_sms' => $credentialsSent,
 			], 201);
 
 		} catch (\Exception $e) {
-			// Rollback de la transaction en cas d'erreur
-			DB::rollBack();
+			Log::error('Erreur lors de la création d’un usager par un lavage', [
+				'error' => $e->getMessage(),
+				'lavage_id' => auth('api')->id(),
+			]);
 
 			return response()->json([
 				'success' => false,
-				'message' => "Une erreur est survenue lors de l'enregistrement de l'utilisateur.",
-				'dev' => $e->getMessage(),
+				'message' => "Une erreur est survenue lors de la création de l’usager et de son véhicule.",
 			], 500);
 		}
 	}
