@@ -47,12 +47,12 @@ class UsagerController extends Controller
 	{
 		// Validation des données d'entrée
 		$validator = Validator::make($request->all(), [
-			'indicatif' => 'required|string',
-			'nom' => 'required|string',
-			'prenoms' => 'required|string',
-			'mobile' => 'required|numeric|unique:users',
-			'is_whatsapp' => 'required|numeric',
-			'immatriculation' => 'nullable|string|unique:vehicules,matricule',
+			'indicatif' => 'nullable|string|max:10',
+			'nom' => 'nullable|string|max:255',
+			'prenoms' => 'nullable|string|max:255',
+			'mobile' => 'nullable|numeric|unique:users,mobile',
+			'is_whatsapp' => 'nullable|boolean',
+			'immatriculation' => 'required|string|unique:vehicules,matricule',
 			'carte_grise' => 'nullable|string|unique:vehicules,carte_grise',
 			'photos' => 'nullable|array|size:4',
 			'photos.*' => 'file|image|max:25048',
@@ -61,6 +61,10 @@ class UsagerController extends Controller
 			'type_de_carburant_id' => 'nullable|exists:type_de_carburants,id',
 			'couleur' => 'nullable|string|max:50',
 			'modele' => 'nullable|string',
+		], [
+			'immatriculation.required' => 'L’immatriculation du véhicule est obligatoire.',
+			'immatriculation.unique' => 'Un véhicule est déjà enregistré avec cette immatriculation.',
+			'mobile.unique' => 'Ce numéro de téléphone est déjà utilisé.',
 		]);
 
 		if ($validator->fails()) {
@@ -87,7 +91,7 @@ class UsagerController extends Controller
 			$user->nom = $request->nom;
 			$user->prenoms = $request->prenoms;
 			$user->password = bcrypt($rawPassword); // Hash sécurisé du mot de passe
-			$user->is_whatsapp = $request->is_whatsapp;
+			$user->is_whatsapp = $request->boolean('is_whatsapp');
 			$user->commercial_id = $commercial->id;
 
 			$user->save();
@@ -129,25 +133,25 @@ class UsagerController extends Controller
 			// Commit de la transaction
 			DB::commit();
 
-			$mobileWithIndicatif = $request->indicatif . $request->mobile;
-			$password = $rawPassword;
-
-			// Construire le message
-			$message = strtoupper(
-				"Votre compte a ete cree avec succes\n" .
-				"Voici vos identifiants de connexion :\n" .
-				"Numero de telephone : $mobileWithIndicatif\n" .
-				"Mot de passe : $password"
-			);
-
-			// Envoyer le SMS
-			$smsResponse = $this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
+			$credentialsSent = false;
+			if ($request->filled('indicatif') && $request->filled('mobile')) {
+				$mobileWithIndicatif = $request->indicatif . $request->mobile;
+				$message = strtoupper(
+					"Votre compte a ete cree avec succes\n" .
+					"Voici vos identifiants de connexion :\n" .
+					"Numero de telephone : $mobileWithIndicatif\n" .
+					"Mot de passe : $rawPassword"
+				);
+				$smsResponse = $this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
+				$credentialsSent = $smsResponse->getStatusCode() === 200;
+			}
 
 			$response = [
 				'success' => true,
 				'message' => 'Utilisateur enregistré avec succès.',
 				'user' => $user,
 				'vehicule' => $vehicule ? $this->attachVehiculePhotoUrls($vehicule) : null,
+				'identifiants_envoyes_par_sms' => $credentialsSent,
 			];
 
 			if ($abonnement) {
