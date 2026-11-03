@@ -35,4 +35,14 @@ class Vehicule extends Model
     {
         return $this->belongsTo(Marque::class);
     }
+
+    public function typeDeVehicule()
+    {
+        return $this->belongsTo(Type_de_vehicule::class, 'type_de_vehicule_id');
+    }
+
+    public function typeDeCarburant()
+    {
+        return $this->belongsTo(Type_de_carburant::class, 'type_de_carburant_id');
+    }
 }

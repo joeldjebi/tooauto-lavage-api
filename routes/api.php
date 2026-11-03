@@ -134,6 +134,7 @@ Route::prefix('attributions')->middleware('auth:api')->group(function () {
     Route::post('/attribuer-vehicule', [AuthController::class, 'attribuerVehicule']);
     Route::post('/terminer-lavage/{attributionId}', [AuthController::class, 'terminerLavage']);
     Route::get('/en-cours', [AuthController::class, 'getAttributionsEnCours']);
+    Route::get('/historique', [AuthController::class, 'historiqueLavages']);
     Route::get('/laveur/{laveurId}/vehicules', [AuthController::class, 'getVehiculesByLaveur']);
     Route::get('/stats-station', [StationLavageController::class, 'statsLavageStation']);
     Route::post('/type-lavage', [StationLavageController::class, 'storeTypeLavage']);

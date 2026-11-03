@@ -79,6 +79,22 @@ class AttributionVehicule extends Model
     }
 
     /**
+     * Relation avec la station de lavage
+     */
+    public function stationLavage()
+    {
+        return $this->belongsTo(StationLavage::class, 'station_lavage_id');
+    }
+
+    /**
+     * Relation avec le passage de carte de fidélité généré par ce lavage
+     */
+    public function fidelitePassage()
+    {
+        return $this->hasOne(FidelitePassage::class, 'attribution_vehicule_id');
+    }
+
+    /**
      * Vérifier si l'attribution est en cours
      */
     public function isEnCours()
@@ -104,7 +120,7 @@ class AttributionVehicule extends Model
         }
 
         $dateFin = $this->date_fin ?? now();
-        return $this->date_debut->diffInMinutes($dateFin);
+        return (int) $this->date_debut->diffInMinutes($dateFin);
     }
 
     /**

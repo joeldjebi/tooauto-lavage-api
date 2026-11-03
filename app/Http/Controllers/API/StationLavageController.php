@@ -333,6 +333,22 @@ class StationLavageController extends Controller
                     }),
                 ];
             })->values(),
+            'par_mode_paiement' => $termines->groupBy(fn ($attribution) => $attribution->mode_paiement ?? 'non_renseigne')
+                ->map(function ($items, $modePaiement) {
+                    return [
+                        'mode_paiement' => $modePaiement,
+                        'total_lavages' => $items->count(),
+                        'revenu_realise' => $items->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                        'par_operateur' => $modePaiement === 'mobile_money'
+                            ? $items->groupBy(fn ($attribution) => $attribution->operateur_paiement ?? 'non_renseigne')
+                                ->map(fn ($itemsOperateur, $operateur) => [
+                                    'operateur_paiement' => $operateur,
+                                    'total_lavages' => $itemsOperateur->count(),
+                                    'revenu_realise' => $itemsOperateur->sum(fn ($attribution) => (float) ($attribution->typeLavage?->montant ?? 0)),
+                                ])->values()
+                            : [],
+                    ];
+                })->values(),
             'par_laveur' => $attributions->flatMap(function ($attribution) {
                 return $attribution->laveurs->map(fn ($laveur) => [
                     'laveur' => $laveur,
@@ -369,6 +385,8 @@ class StationLavageController extends Controller
                     'libelle' => $attribution->typeLavage?->libelle,
                     'montant' => $attribution->typeLavage?->montant,
                     'montant_laveur' => $attribution->typeLavage?->montant_laveur,
+                    'mode_paiement' => $attribution->mode_paiement,
+                    'operateur_paiement' => $attribution->operateur_paiement,
                     'statut' => $attribution->statut,
                     'date_attribution' => $attribution->date_attribution,
                     'date_debut' => $attribution->date_debut,

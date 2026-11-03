@@ -1709,6 +1709,269 @@ class AuthController extends Controller
         }
     }
 
+    /**
+     * Historique complet des lavages de la station (manager) ou du laveur connecté
+     */
+    public function historiqueLavages(Request $request)
+    {
+        try {
+            $currentUser = Auth::guard('api')->user();
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Utilisateur non authentifié.'
+                ], 401);
+            }
+
+            if (!in_array((int) $currentUser->role, [1, 2], true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé.'
+                ], 403);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'date_debut' => 'nullable|date',
+                'date_fin' => 'nullable|date|after_or_equal:date_debut',
+                'statut' => 'nullable|string|in:en_cours,termine,annule,tous',
+                'laveur_id' => 'nullable|integer',
+                'type_lavage_id' => 'nullable|integer',
+                'matricule' => 'nullable|string|max:50',
+                'mode_paiement' => 'nullable|string|in:espece,mobile_money',
+                'operateur_paiement' => 'nullable|string|in:OM,MTN,MOOV,WAVE,CB',
+                'per_page' => 'nullable|integer|min:1|max:100',
+                'page' => 'nullable|integer|min:1',
+            ], [
+                'date_fin.after_or_equal' => 'La date de fin doit être supérieure ou égale à la date de début.',
+                'statut.in' => 'Le statut doit être : en_cours, termine, annule ou tous.',
+                'mode_paiement.in' => 'Le moyen de paiement doit être espece ou mobile_money.',
+                'operateur_paiement.in' => 'L’opérateur doit être OM, MTN, MOOV, WAVE ou CB.',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation échouée.',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $stationLavage = $this->resolveStationLavageForUser($currentUser);
+            if (!$stationLavage) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Station de lavage non trouvée.'
+                ], 404);
+            }
+
+            $query = AttributionVehicule::with([
+                'stationLavage',
+                'manager',
+                'laveur',
+                'laveurs',
+                'typeLavage',
+                'vehicule.marque',
+                'vehicule.typeDeVehicule',
+                'vehicule.typeDeCarburant',
+                'vehicule.user',
+                'fidelitePassage.fidelite',
+            ])->where('station_lavage_id', $stationLavage->id);
+
+            // Un laveur ne voit que ses propres lavages
+            $laveurId = $currentUser->role == 2 ? $currentUser->id : $request->laveur_id;
+            if ($laveurId) {
+                $query->where(function ($query) use ($laveurId) {
+                    $query->where('laveur_id', $laveurId)
+                        ->orWhereHas('laveurs', fn ($subQuery) => $subQuery->where('lavages.id', $laveurId));
+                });
+            }
+
+            $statut = $request->get('statut', 'tous');
+            if ($statut !== 'tous') {
+                $query->where('statut', $statut);
+            }
+
+            if ($request->filled('date_debut')) {
+                $query->where('date_attribution', '>=', \Carbon\Carbon::parse($request->date_debut)->startOfDay());
+            }
+
+            if ($request->filled('date_fin')) {
+                $query->where('date_attribution', '<=', \Carbon\Carbon::parse($request->date_fin)->endOfDay());
+            }
+
+            foreach (['type_lavage_id', 'mode_paiement', 'operateur_paiement'] as $filter) {
+                if ($request->filled($filter)) {
+                    $query->where($filter, $request->input($filter));
+                }
+            }
+
+            if ($request->filled('matricule')) {
+                $query->where('matricule_vehicule', 'like', '%' . trim($request->matricule) . '%');
+            }
+
+            $totauxQuery = (clone $query)->leftJoin('type_lavages', 'type_lavages.id', '=', 'attribution_vehicules.type_lavage_id');
+            $totaux = [
+                'total_lavages' => (clone $totauxQuery)->count(),
+                'montant_total' => (float) (clone $totauxQuery)->where('attribution_vehicules.statut', 'termine')->sum('type_lavages.montant'),
+                'montant_espece' => (float) (clone $totauxQuery)->where('attribution_vehicules.statut', 'termine')->where('attribution_vehicules.mode_paiement', 'espece')->sum('type_lavages.montant'),
+                'montant_mobile_money' => (float) (clone $totauxQuery)->where('attribution_vehicules.statut', 'termine')->where('attribution_vehicules.mode_paiement', 'mobile_money')->sum('type_lavages.montant'),
+            ];
+
+            $attributions = $query->orderBy('date_attribution', 'desc')
+                ->paginate((int) $request->get('per_page', 20));
+
+            return response()->json([
+                'success' => true,
+                'message' => $attributions->isEmpty() ? 'Aucun lavage trouvé' : 'Historique des lavages récupéré avec succès',
+                'station' => [
+                    'id' => $stationLavage->id,
+                    'name' => $stationLavage->name,
+                ],
+                'filtres' => [
+                    'date_debut' => $request->date_debut,
+                    'date_fin' => $request->date_fin,
+                    'statut' => $statut,
+                    'laveur_id' => $laveurId ? (int) $laveurId : null,
+                    'type_lavage_id' => $request->type_lavage_id ? (int) $request->type_lavage_id : null,
+                    'matricule' => $request->matricule,
+                    'mode_paiement' => $request->mode_paiement,
+                    'operateur_paiement' => $request->operateur_paiement,
+                ],
+                'totaux' => $totaux,
+                'pagination' => [
+                    'current_page' => $attributions->currentPage(),
+                    'last_page' => $attributions->lastPage(),
+                    'per_page' => $attributions->perPage(),
+                    'total' => $attributions->total(),
+                ],
+                'lavages' => collect($attributions->items())
+                    ->map(fn ($attribution) => $this->formatHistoriqueLavage($attribution))
+                    ->values(),
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur lors de la récupération de l\'historique des lavages', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Une erreur est survenue lors de la récupération de l\'historique des lavages.',
+                'detail' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    protected function formatHistoriqueLavage(AttributionVehicule $attribution): array
+    {
+        $vehicule = $attribution->vehicule;
+        $proprietaire = $vehicule?->user;
+        $typeLavage = $attribution->typeLavage;
+        $passage = $attribution->fidelitePassage;
+        $carte = $passage?->fidelite;
+        $nombreLaveurs = $attribution->laveurs->count();
+        $estTermine = $attribution->statut === AttributionVehicule::STATUT_TERMINE;
+
+        $photos = $vehicule?->photos ?? [];
+        if (is_string($photos)) {
+            $photos = json_decode($photos, true) ?: [];
+        }
+
+        // La carte est complétée par ce lavage s'il en est le dernier passage
+        $carteCompleteeParCeLavage = $carte
+            && $carte->statut === 'complete'
+            && $carte->passages()->latest('used_at')->latest('id')->value('id') === $passage->id;
+
+        return [
+            'id' => $attribution->id,
+            'statut' => $attribution->statut,
+            'statut_text' => $attribution->statut_name,
+            'notes' => $attribution->notes,
+
+            'dates' => [
+                'date_attribution' => $attribution->date_attribution,
+                'date_debut' => $attribution->date_debut,
+                'date_fin' => $attribution->date_fin,
+                'duree_minutes' => $attribution->date_debut ? $attribution->getDureeMinutes() : null,
+                'duree_formatee' => $attribution->date_debut ? $attribution->getDureeFormatee() : null,
+                'created_at' => $attribution->created_at,
+                'updated_at' => $attribution->updated_at,
+            ],
+
+            'type_lavage' => [
+                'id' => $typeLavage?->id ?? $attribution->type_lavage_id,
+                'libelle' => $typeLavage?->libelle,
+                'montant' => $typeLavage?->montant,
+                'montant_laveur' => $typeLavage?->montant_laveur,
+            ],
+
+            'paiement' => [
+                'mode_paiement' => $attribution->mode_paiement,
+                'mode_paiement_text' => match ($attribution->mode_paiement) {
+                    'espece' => 'Espèce',
+                    'mobile_money' => 'Mobile money',
+                    default => null,
+                },
+                'operateur_paiement' => $attribution->operateur_paiement,
+                'est_paye' => $estTermine && $attribution->mode_paiement !== null,
+                'montant' => $typeLavage?->montant,
+                'montant_laveurs_total' => $typeLavage ? (float) $typeLavage->montant_laveur * $nombreLaveurs : null,
+            ],
+
+            'vehicule' => [
+                'id' => $vehicule?->id,
+                'matricule' => $vehicule->matricule ?? $attribution->matricule_vehicule,
+                'marque' => $vehicule?->marque?->libelle,
+                'modele' => $vehicule?->modele,
+                'couleur' => $vehicule?->couleur,
+                'type_de_vehicule' => $vehicule?->typeDeVehicule?->libelle,
+                'type_de_carburant' => $vehicule?->typeDeCarburant?->libelle,
+                'photos' => collect(is_array($photos) ? $photos : [])->filter()
+                    ->map(fn ($photo) => $this->wasabiService->temporaryUrl($photo))
+                    ->values(),
+            ],
+
+            'proprietaire' => $proprietaire ? [
+                'id' => $proprietaire->id,
+                'nom' => $proprietaire->nom,
+                'prenoms' => $proprietaire->prenoms,
+                'nom_complet' => trim($proprietaire->nom . ' ' . $proprietaire->prenoms),
+                'indicatif' => $proprietaire->indicatif,
+                'mobile' => $proprietaire->mobile,
+                'email' => $proprietaire->email,
+                'is_whatsapp' => $proprietaire->is_whatsapp,
+            ] : null,
+
+            'laveurs' => $attribution->laveurs->map(fn ($laveur) => $this->formatLaveurSummary($laveur))->values(),
+            'laveur_principal' => $attribution->laveur ? $this->formatLaveurSummary($attribution->laveur) : null,
+
+            'manager' => $attribution->manager ? [
+                'id' => $attribution->manager->id,
+                'nom_complet' => $attribution->manager->first_name . ' ' . $attribution->manager->last_name,
+                'mobile' => $attribution->manager->mobile,
+            ] : null,
+
+            'station' => $attribution->stationLavage ? [
+                'id' => $attribution->stationLavage->id,
+                'name' => $attribution->stationLavage->name,
+                'adresse' => $attribution->stationLavage->adresse,
+                'contact' => $attribution->stationLavage->contact,
+            ] : null,
+
+            'fidelite' => $passage ? [
+                'passage_id' => $passage->id,
+                'source' => $passage->source,
+                'used_at' => $passage->used_at,
+                'carte_id' => $carte?->id,
+                'carte_statut' => $carte?->statut,
+                'cases_remplies' => $carte?->cases_remplies,
+                'total_cases' => $carte?->total_cases,
+                'recompense_debloquee' => (bool) $carteCompleteeParCeLavage,
+            ] : null,
+        ];
+    }
+
     protected function findLavageByPhone(string $indicatif, string $mobile): ?Lavage
     {
         return Lavage::whereIn('mobile', $this->mobileVariants($indicatif, $mobile))->first();
