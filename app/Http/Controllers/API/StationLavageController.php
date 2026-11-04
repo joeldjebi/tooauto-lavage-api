@@ -22,14 +22,17 @@ use App\Models\ReferralCode;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use App\Services\WasabiService;
+use App\Services\ClientLavageService;
 
 class StationLavageController extends Controller
 {
     protected $wasabiService;
+    protected $clientLavageService;
 
-    public function __construct(WasabiService $wasabiService)
+    public function __construct(WasabiService $wasabiService, ClientLavageService $clientLavageService)
     {
         $this->wasabiService = $wasabiService;
+        $this->clientLavageService = $clientLavageService;
     }
 
     public function index()
@@ -583,24 +586,11 @@ class StationLavageController extends Controller
 
     public function registerUsager(Request $request)
 	{
-		$validator = Validator::make($request->all(), [
-			'immatriculation' => 'required|string|unique:vehicules,matricule',
-			'indicatif' => 'nullable|string|max:10',
-			'nom' => 'nullable|string|max:255',
-			'prenoms' => 'nullable|string|max:255',
-			'mobile' => 'nullable|numeric|unique:users,mobile',
-			'is_whatsapp' => 'nullable|boolean',
-			'carte_grise' => 'nullable|string|unique:vehicules,carte_grise',
-			'type_de_vehicule_id' => 'nullable|exists:type_de_vehicules,id',
-			'marque_id' => 'nullable|exists:marques,id',
-			'type_de_carburant_id' => 'nullable|exists:type_de_carburants,id',
-			'couleur' => 'nullable|string|max:50',
-			'modele' => 'nullable|string|max:255',
-		], [
-			'immatriculation.required' => 'L’immatriculation du véhicule est obligatoire.',
-			'immatriculation.unique' => 'Un véhicule est déjà enregistré avec cette immatriculation.',
-			'mobile.unique' => 'Ce numéro de téléphone est déjà utilisé.',
-		]);
+		$validator = Validator::make(
+			$request->all(),
+			ClientLavageService::validationRules(),
+			ClientLavageService::validationMessages()
+		);
 
 		if ($validator->fails()) {
 			return response()->json([
@@ -620,11 +610,7 @@ class StationLavageController extends Controller
 				], 401);
 			}
 
-			$stationOwnerIds = collect([$lavage->id, $lavage->created_by])
-				->filter()
-				->unique()
-				->values();
-			$stationDeLavage = StationLavage::whereIn('created_by', $stationOwnerIds)->first();
+			$stationDeLavage = $this->clientLavageService->resolveStation($lavage);
 
 			if (!$stationDeLavage) {
 				return response()->json([
@@ -633,53 +619,12 @@ class StationLavageController extends Controller
 				], 404);
 			}
 
-			$parrain = Parrain::where('station_de_lavage_id', $stationDeLavage->id)->first();
-			$rawPassword = (string) random_int(100000, 999999);
-			[$user, $vehicule] = DB::transaction(function () use ($request, $lavage, $stationDeLavage, $parrain, $rawPassword) {
-				$user = new User();
-				$user->uuid = (string) Str::uuid();
-				$user->indicatif = $request->input('indicatif');
-				$user->mobile = $request->input('mobile');
-				$user->nom = $request->input('nom');
-				$user->prenoms = $request->input('prenoms');
-				$user->password = bcrypt($rawPassword);
-				$user->is_whatsapp = $request->boolean('is_whatsapp');
-				$user->lavage_id = $lavage->id;
-				$user->station_de_lavage_id = $stationDeLavage->id;
-				$user->save();
-
-				$vehicule = new Vehicule();
-				$vehicule->matricule = $request->immatriculation;
-				$vehicule->carte_grise = $request->input('carte_grise');
-				$vehicule->type_de_vehicule_id = $request->input('type_de_vehicule_id');
-				$vehicule->marque_id = $request->input('marque_id');
-				$vehicule->type_de_carburant_id = $request->input('type_de_carburant_id');
-				$vehicule->couleur = $request->input('couleur');
-				$vehicule->modele = $request->input('modele');
-				$vehicule->user_id = $user->id;
-				$vehicule->created_by = $lavage->id;
-				$vehicule->save();
-
-				if ($parrain) {
-					ReferralCode::create([
-						'user_id' => $user->id,
-						'code' => $parrain->code,
-					]);
-				}
-
-				return [$user, $vehicule];
-			});
+			$result = $this->clientLavageService->register($request, $lavage, $stationDeLavage);
 
 			$credentialsSent = false;
 			if ($request->filled('indicatif') && $request->filled('mobile')) {
 				$mobileWithIndicatif = $request->indicatif . $request->mobile;
-				$parrainLine = $parrain ? "\nCode parrain : {$parrain->code}" : '';
-				$message = strtoupper(
-					"Votre compte a ete cree avec succes\n" .
-					"Voici vos identifiants de connexion :\n" .
-					"Numero de telephone : $mobileWithIndicatif\n" .
-					"Mot de passe : $rawPassword" . $parrainLine
-				);
+				$message = $this->clientLavageService->buildCredentialsMessage($mobileWithIndicatif, $result['password'], $result['parrain']);
 				$smsResponse = $this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
 				$credentialsSent = $smsResponse->getStatusCode() === 200;
 			}
@@ -687,9 +632,10 @@ class StationLavageController extends Controller
 			return response()->json([
 				'success' => true,
 				'message' => 'Usager et véhicule enregistrés avec succès.',
-				'user' => $user,
-				'vehicule' => $vehicule,
-				'parrain' => $parrain,
+				'user' => $result['user'],
+				'vehicule' => $this->attachVehiculePhotoUrls($result['vehicule']),
+				'parrain' => $result['parrain'],
+				'abonnement' => $result['abonnement'],
 				'identifiants_envoyes_par_sms' => $credentialsSent,
 			], 201);
 

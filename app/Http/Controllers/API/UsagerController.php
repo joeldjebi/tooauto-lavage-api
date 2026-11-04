@@ -12,8 +12,6 @@ use App\Models\Vehicule;
 use App\Models\Lavage;
 use App\Models\Parrain;
 use App\Models\ReferralCode;
-use App\Models\Forfait_usager;
-use App\Models\AbonnementUsager;
 use Validator;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
@@ -30,42 +28,26 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
 use App\Services\WasabiService;
-use App\Services\ReductionCardService;
+use App\Services\ClientLavageService;
 
 class UsagerController extends Controller
 {
 	protected $wasabiService;
-	protected $reductionCardService;
+	protected $clientLavageService;
 
-	public function __construct(WasabiService $wasabiService, ReductionCardService $reductionCardService)
+	public function __construct(WasabiService $wasabiService, ClientLavageService $clientLavageService)
 	{
 		$this->wasabiService = $wasabiService;
-		$this->reductionCardService = $reductionCardService;
+		$this->clientLavageService = $clientLavageService;
 	}
 
 	public function registerUsager(Request $request)
 	{
-		// Validation des données d'entrée
-		$validator = Validator::make($request->all(), [
-			'indicatif' => 'nullable|string|max:10',
-			'nom' => 'nullable|string|max:255',
-			'prenoms' => 'nullable|string|max:255',
-			'mobile' => 'nullable|numeric|unique:users,mobile',
-			'is_whatsapp' => 'nullable|boolean',
-			'immatriculation' => 'required|string|unique:vehicules,matricule',
-			'carte_grise' => 'nullable|string|unique:vehicules,carte_grise',
-			'photos' => 'nullable|array|size:4',
-			'photos.*' => 'file|image|max:25048',
-			'type_de_vehicule_id' => 'nullable|exists:type_de_vehicules,id',
-			'marque_id' => 'nullable|exists:marques,id',
-			'type_de_carburant_id' => 'nullable|exists:type_de_carburants,id',
-			'couleur' => 'nullable|string|max:50',
-			'modele' => 'nullable|string',
-		], [
-			'immatriculation.required' => 'L’immatriculation du véhicule est obligatoire.',
-			'immatriculation.unique' => 'Un véhicule est déjà enregistré avec cette immatriculation.',
-			'mobile.unique' => 'Ce numéro de téléphone est déjà utilisé.',
-		]);
+		$validator = Validator::make(
+			$request->all(),
+			ClientLavageService::validationRules(),
+			ClientLavageService::validationMessages()
+		);
 
 		if ($validator->fails()) {
 			return response()->json([
@@ -75,73 +57,23 @@ class UsagerController extends Controller
 			], 422);
 		}
 
-		// Utilisation d'une transaction pour garantir l'intégrité des données
-		DB::beginTransaction();
 		try {
+			$lavage = auth('api')->user();
 
-			$rawPassword = strval(random_int(100000, 999999));
-
-			$commercial = auth()->user();
-
-			// Création de l'utilisateur
-			$user = new User();
-			$user->uuid = (string) Str::uuid();
-			$user->indicatif = $request->indicatif;
-			$user->mobile = $request->mobile;
-			$user->nom = $request->nom;
-			$user->prenoms = $request->prenoms;
-			$user->password = bcrypt($rawPassword); // Hash sécurisé du mot de passe
-			$user->is_whatsapp = $request->boolean('is_whatsapp');
-			$user->commercial_id = $commercial->id;
-
-			$user->save();
-
-			$vehicule = null;
-
-			if ($request->filled('immatriculation')) {
-				$vehicule = new Vehicule();
-				$vehicule->matricule = $request->immatriculation;
-				$vehicule->carte_grise = $request->carte_grise;
-				$vehicule->type_de_vehicule_id = $request->type_de_vehicule_id;
-				$vehicule->marque_id = $request->marque_id;
-				$vehicule->type_de_carburant_id = $request->type_de_carburant_id;
-				$vehicule->couleur = $request->couleur;
-				$vehicule->modele = $request->modele;
-				$vehicule->user_id = $user->id;
-				$vehicule->created_by = $commercial->id;
-				$vehicule->provenance = "commerciaux";
-
-				if ($request->hasFile('photos')) {
-					$photosPaths = [];
-
-					foreach ($request->file('photos') as $photo) {
-						$photosPaths[] = $this->wasabiService->uploadFile(
-							$photo,
-							'vehicules/photos',
-							'vehicule'
-						);
-					}
-
-					$vehicule->photos = json_encode($photosPaths);
-				}
-
-				$vehicule->save();
+			$station = $this->clientLavageService->resolveStation($lavage);
+			if (!$station) {
+				return response()->json([
+					'success' => false,
+					'message' => 'Station de lavage non trouvée.',
+				], 404);
 			}
 
-			$abonnement = $this->createAutoAbonnementForUser($user);
-
-			// Commit de la transaction
-			DB::commit();
+			$result = $this->clientLavageService->register($request, $lavage, $station);
 
 			$credentialsSent = false;
 			if ($request->filled('indicatif') && $request->filled('mobile')) {
 				$mobileWithIndicatif = $request->indicatif . $request->mobile;
-				$message = strtoupper(
-					"Votre compte a ete cree avec succes\n" .
-					"Voici vos identifiants de connexion :\n" .
-					"Numero de telephone : $mobileWithIndicatif\n" .
-					"Mot de passe : $rawPassword"
-				);
+				$message = $this->clientLavageService->buildCredentialsMessage($mobileWithIndicatif, $result['password'], $result['parrain']);
 				$smsResponse = $this->sendMessageConfirmOrder($message, $mobileWithIndicatif);
 				$credentialsSent = $smsResponse->getStatusCode() === 200;
 			}
@@ -149,74 +81,30 @@ class UsagerController extends Controller
 			$response = [
 				'success' => true,
 				'message' => 'Utilisateur enregistré avec succès.',
-				'user' => $user,
-				'vehicule' => $vehicule ? $this->attachVehiculePhotoUrls($vehicule) : null,
+				'user' => $result['user'],
+				'vehicule' => $this->attachVehiculePhotoUrls($result['vehicule']),
+				'parrain' => $result['parrain'],
 				'identifiants_envoyes_par_sms' => $credentialsSent,
 			];
 
-			if ($abonnement) {
-				$response['abonnement'] = $abonnement->load('forfait');
+			if ($result['abonnement']) {
+				$response['abonnement'] = $result['abonnement'];
 			}
 
-			return response()->json($response, 201); // Utilisation du code HTTP 201 pour "Created"
+			return response()->json($response, 201);
 
 		} catch (\InvalidArgumentException $e) {
-			DB::rollBack();
-
 			return response()->json([
 				'success' => false,
 				'message' => $e->getMessage(),
 			], 422);
 		} catch (\Exception $e) {
-			// Rollback de la transaction en cas d'erreur
-			DB::rollBack();
-
 			return response()->json([
 				'success' => false,
 				'message' => "Une erreur est survenue lors de l'enregistrement de l'utilisateur.",
 				'dev' => $e->getMessage(),
 			], 500);
 		}
-	}
-
-	protected function createAutoAbonnementForUser(User $user): ?AbonnementUsager
-	{
-		$enabled = filter_var(config('services.register_auto_abonnement.enabled'), FILTER_VALIDATE_BOOLEAN);
-
-		if (!$enabled) {
-			return null;
-		}
-
-		$forfaitCode = strtoupper(trim((string) config('services.register_auto_abonnement.forfait', 'FREEMIUM')));
-		$allowedForfaits = ['FREEMIUM', 'PERSONNEL', 'FAMILLE'];
-
-		if (!in_array($forfaitCode, $allowedForfaits, true)) {
-			throw new \InvalidArgumentException("Forfait d'abonnement automatique invalide: {$forfaitCode}.");
-		}
-
-		$forfait = Forfait_usager::whereRaw('UPPER(TRIM(libelle)) = ?', [$forfaitCode])
-			->where('statut', 1)
-			->first();
-
-		if (!$forfait) {
-			throw new \InvalidArgumentException("Forfait d'abonnement automatique actif introuvable: {$forfaitCode}.");
-		}
-
-		$dateDebut = now()->toDateString();
-		$dateFin = now()->addMonths((int) $forfait->duree)->toDateString();
-
-		$abonnement = AbonnementUsager::create([
-			'user_id' => $user->id,
-			'forfait_id' => $forfait->id,
-			'date_debut' => $dateDebut,
-			'date_fin' => $dateFin,
-			'statut' => 1,
-			'is_free' => 1,
-		]);
-
-		$this->reductionCardService->assignCardsToSubscription($abonnement);
-
-		return $abonnement;
 	}
 
 	public function getUsagerByStation()

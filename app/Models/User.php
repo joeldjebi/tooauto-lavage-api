@@ -47,7 +47,32 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'activated_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Usager réel : s'est inscrit ou connecté au moins une fois sur l'app usager
+     */
+    public function isActive(): bool
+    {
+        return $this->activated_at !== null;
+    }
+
+    /**
+     * Scope pour les usagers réels
+     */
+    public function scopeActifs($query)
+    {
+        return $query->whereNotNull('activated_at');
+    }
+
+    /**
+     * Scope pour les clients créés par un lavage, pas encore devenus usagers
+     */
+    public function scopeClientsLavageNonActives($query)
+    {
+        return $query->whereNotNull('lavage_id')->whereNull('activated_at');
     }
 
     /**
