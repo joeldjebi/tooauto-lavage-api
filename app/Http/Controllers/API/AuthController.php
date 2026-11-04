@@ -54,11 +54,8 @@ class AuthController extends Controller
             return response()->json(['error' => 'Compte désactivé'], 403);
         }
 
-        // Log pour débogage
         \Log::info('Tentative de connexion', [
             'mobile' => $request->mobile,
-            'password_provided' => $request->password,
-            'password_hash' => $user->password
         ]);
 
         // Tenter l'authentification
@@ -231,10 +228,8 @@ class AuthController extends Controller
             return $lavage;
         });
 
-        // Log pour débogage
         \Log::info('Nouvel utilisateur créé', [
             'mobile' => $request->mobile,
-            'password_hash' => $password
         ]);
 
         return response()->json([
@@ -439,10 +434,8 @@ class AuthController extends Controller
                 'created_by' => $stationLavage->created_by
             ]);
 
-            // Log pour débogage
             \Log::info('Nouvel utilisateur créé', [
                 'mobile' => $request->mobile,
-                'password_hash' => $passwordRegister
             ]);
 
             $mobile = $request->mobile;
@@ -1881,7 +1874,7 @@ class AuthController extends Controller
         // La carte est complétée par ce lavage s'il en est le dernier passage
         $carteCompleteeParCeLavage = $carte
             && $carte->statut === 'complete'
-            && $carte->passages()->latest('used_at')->latest('id')->value('id') === $passage->id;
+            && (int) $carte->passages()->reorder()->orderByDesc('used_at')->orderByDesc('id')->value('id') === (int) $passage->id;
 
         return [
             'id' => $attribution->id,

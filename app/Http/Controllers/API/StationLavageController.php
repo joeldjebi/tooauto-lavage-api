@@ -73,6 +73,13 @@ class StationLavageController extends Controller
             ], 401);
         }
 
+        if ((int) $lavage->role !== 1) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Accès non autorisé. Seuls les managers peuvent gérer les types de lavage.'
+            ], 403);
+        }
+
         $validator = Validator::make($request->all(), [
             'libelle' => 'required|string|max:200|unique:type_lavages,libelle,NULL,id,lavage_id,' . $lavageId,
             'montant' => 'required|numeric|min:0',
@@ -138,6 +145,13 @@ class StationLavageController extends Controller
             ], 401);
         }
 
+        if ((int) $lavage->role !== 1) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Accès non autorisé. Seuls les managers peuvent gérer les types de lavage.'
+            ], 403);
+        }
+
         $typeLavage = Type_lavage::where('lavage_id', $lavageId)->find($id);
 
         if (!$typeLavage) {
@@ -187,6 +201,13 @@ class StationLavageController extends Controller
                 'status' => 'error',
                 'message' => 'Lavage non authentifié'
             ], 401);
+        }
+
+        if ((int) $lavage->role !== 1) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Accès non autorisé. Seuls les managers peuvent gérer les types de lavage.'
+            ], 403);
         }
 
         $typeLavage = Type_lavage::where('lavage_id', $lavageId)->find($id);
