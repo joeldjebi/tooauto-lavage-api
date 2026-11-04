@@ -1,0 +1,3727 @@
+{
+  "info": {
+    "_postman_id": "b705db17-9a53-5d76-b94e-ab1a9f352f34",
+    "name": "TOOAUTO Lavage API",
+    "description": "API des stations de lavage TOOAUTO.\n\n## Démarrage\n1. Renseignez la variable de collection `base_url` (par défaut `http://lavage.tooauto.com/api`).\n2. Lancez **1. Authentification > Login** : le token JWT est enregistré automatiquement dans `{{token}}`.\n3. Toutes les autres requêtes utilisent `Authorization: Bearer {{token}}`.\n\n## Rôles\n- **Manager** (`role = 1`) : gère la station, les laveurs, les prix, attribue et termine les lavages, encaisse.\n- **Laveur** (`role = 2`) : consulte ses lavages, ses dépôts et ses statistiques.\n\n## Deux circuits\n- **Véhicules et motos** (dossiers 5 à 8) : attribution → fin du lavage avec paiement → carte de fidélité par immatriculation. Une moto est un véhicule avec `type_de_vehicule_id` = Moto.\n- **Articles sans plaque** (dossier 9) : tapis, moquette, bâche... dépôt → lavage → retrait, sans fidélité.\n\n## Paiement\n`mode_paiement` : `espece` ou `mobile_money`. En mobile money, `operateur_paiement` est obligatoire : `OM` (Orange Money), `WAVE`, `MTN`, `MOOV` (Moov Money) ou `CB` (carte bancaire).\n\n## Réponses\nErreurs de validation : HTTP 422 avec `errors` par champ. Non authentifié : 401. Accès refusé : 403. Introuvable : 404.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://lavage.tooauto.com/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentification",
+      "description": "Connexion des comptes lavage (manager role=1, laveur role=2). Lancez **Login** en premier : le token est enregistré automatiquement dans la variable `{{token}}`.",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Connexion d'un manager ou d'un laveur. Renvoie un token JWT, enregistré automatiquement dans `{{token}}` par le script de test.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `mobile` | Oui | `string` |\n| `password` | Oui | `string`, `min:6` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"0700000000\",\n  \"password\": \"secret123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.access_token || json.token) {",
+                  "    pm.collectionVariables.set('token', json.access_token || json.token);",
+                  "    console.log('Token enregistré dans la variable {{token}}');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inscription manager",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Création d'un compte manager de station de lavage.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `first_name` | Oui | `string`, `max:100` |\n| `last_name` | Oui | `string`, `max:100` |\n| `mobile` | Oui | `string`, `unique:lavages`, `regex:/^[0-9]{10}$/` |\n| `email` | Non | `email`, `unique:lavages` |\n| `password` | Oui | `string`, `min:6` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Jean\",\n  \"last_name\": \"Kouassi\",\n  \"mobile\": \"0700000000\",\n  \"email\": \"jean@exemple.ci\",\n  \"password\": \"secret123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mon profil",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Profil du compte connecté."
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier mon profil",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/update",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "update"
+              ]
+            },
+            "description": "Mise à jour du nom, prénom ou email du compte connecté.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `first_name` | Non | `string`, `max:100` |\n| `last_name` | Non | `string`, `max:100` |\n| `email` | Non | `email`, `unique` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Jean\",\n  \"last_name\": \"Kouassi\",\n  \"email\": \"jean@exemple.ci\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier mon mot de passe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/update-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "update-password"
+              ]
+            },
+            "description": "Changement de mot de passe du compte connecté.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `current_password` | Oui | `string` |\n| `new_password` | Oui | `string`, `min:6` |\n| `new_password_confirmation` | Oui | `string`, `same:new_password` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"secret123\",\n  \"new_password\": \"nouveau123\",\n  \"new_password_confirmation\": \"nouveau123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mot de passe oublié",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/forgot-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "forgot-password"
+              ]
+            },
+            "description": "Envoie un code à 6 chiffres par SMS. Limité à 3 appels par minute.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `indicatif` | Oui | `string`, `max:10` |\n| `mobile` | Oui | `string`, `max:30` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"indicatif\": \"225\",\n  \"mobile\": \"0700000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Réinitialiser le mot de passe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/reset-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "Réinitialise le mot de passe avec le code reçu par SMS. Limité à 5 appels par minute.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `indicatif` | Oui | `string`, `max:10` |\n| `mobile` | Oui | `string`, `max:30` |\n| `code` | Oui | `string`, `size:6` |\n| `password` | Oui | `string`, `min:6` |\n| `password_confirmation` | Oui | `string`, `same:password` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"indicatif\": \"225\",\n  \"mobile\": \"0700000000\",\n  \"code\": \"123456\",\n  \"password\": \"nouveau123\",\n  \"password_confirmation\": \"nouveau123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Déconnexion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Invalide le token courant."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Station de lavage",
+      "description": "Gestion de la station et des tables de référence (types de véhicule, carburants, marques).",
+      "item": [
+        {
+          "name": "Lister les stations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage"
+              ]
+            },
+            "description": "Liste des stations de lavage."
+          },
+          "response": []
+        },
+        {
+          "name": "Créer une station",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage"
+              ]
+            },
+            "description": "Création de la station du manager connecté (multipart pour le logo).\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `name` | Oui | `string`, `max:200` |\n| `adresse` | Non | `string`, `max:500` |\n| `contact` | Non | `string`, `max:20` |\n| `longitude` | Non | `string`, `max:20` |\n| `latitude` | Non | `string`, `max:20` |\n| `logo` | Non | `image`, `mimes:jpeg,png,jpg,gif,svg`, `max:2048` |",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "Station Cocody",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "adresse",
+                  "value": "Cocody Angré",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "contact",
+                  "value": "0700000000",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "longitude",
+                  "value": "-3.98",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "latitude",
+                  "value": "5.36",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "logo",
+                  "type": "file",
+                  "src": [],
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Voir une station",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Détail d'une station."
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier une station",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Mise à jour d'une station.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `name` | Non | `string`, `max:200` |\n| `adresse` | Non | `string`, `max:500` |\n| `contact` | Non | `string`, `max:20` |\n| `longitude` | Non | `string`, `max:20` |\n| `latitude` | Non | `string`, `max:20` |\n| `logo` | Non | `image`, `mimes:jpeg,png,jpg,gif,svg`, `max:2048` |\n| `statut` | Non | `integer`, `in:0,1` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Station Cocody\",\n  \"adresse\": \"Cocody Angré 8e tranche\",\n  \"statut\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Supprimer une station",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Suppression d'une station."
+          },
+          "response": []
+        },
+        {
+          "name": "Types de véhicule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage/type_de_vehicule",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage",
+                "type_de_vehicule"
+              ]
+            },
+            "description": "Liste des types de véhicule (Berline, 4x4, SUV, **Moto**...). Utilisez l'id dans `type_de_vehicule_id` à la création d'un client."
+          },
+          "response": []
+        },
+        {
+          "name": "Types de carburant",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage/type_de_carburant",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage",
+                "type_de_carburant"
+              ]
+            },
+            "description": "Liste des types de carburant."
+          },
+          "response": []
+        },
+        {
+          "name": "Marques",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage/marque",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage",
+                "marque"
+              ]
+            },
+            "description": "Liste des marques de véhicule."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Laveurs",
+      "description": "Gestion des laveurs de la station (comptes role = 2 créés par le manager).",
+      "item": [
+        {
+          "name": "Lister les laveurs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/laveurs?per_page=15&status=active",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "laveurs"
+              ],
+              "query": [
+                {
+                  "key": "per_page",
+                  "value": "15",
+                  "disabled": false
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "disabled": false
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Liste paginée des laveurs du manager.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `per_page` | Non | `integer (15 par défaut)` |\n| `status` | Non | `in:active,inactive` |\n| `search` | Non | `string (nom ou mobile)` |"
+          },
+          "response": []
+        },
+        {
+          "name": "Laveurs actifs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/laveurs/actifs",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "laveurs",
+                "actifs"
+              ]
+            },
+            "description": "Laveurs actifs, disponibles pour une attribution."
+          },
+          "response": []
+        },
+        {
+          "name": "Créer un laveur",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/laveurs/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "laveurs",
+                "register"
+              ]
+            },
+            "description": "Création d'un laveur. Ses identifiants lui sont envoyés par SMS.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `first_name` | Oui | `string`, `max:100` |\n| `last_name` | Oui | `string`, `max:100` |\n| `mobile` | Oui | `string`, `unique:lavages`, `regex:/^[0-9]{10}$/` |\n| `email` | Non | `email`, `unique:lavages` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Moussa\",\n  \"last_name\": \"Koné\",\n  \"mobile\": \"0500000000\",\n  \"email\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Voir un laveur",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/laveurs/:laveurId",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "laveurs",
+                ":laveurId"
+              ],
+              "variable": [
+                {
+                  "key": "laveurId",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Détail d'un laveur."
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier un laveur",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/laveurs/:laveurId",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "laveurs",
+                ":laveurId"
+              ],
+              "variable": [
+                {
+                  "key": "laveurId",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Mise à jour d'un laveur.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `first_name` | Oui | `string`, `max:100` |\n| `last_name` | Oui | `string`, `max:100` |\n| `mobile` | Non | `string`, `regex:10 chiffres`, `unique` |\n| `email` | Non | `email`, `unique` |\n| `password` | Non | `string`, `min:6` |\n| `statut` | Oui | `integer`, `in:0,1` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Moussa\",\n  \"last_name\": \"Koné\",\n  \"statut\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Activer / désactiver un laveur",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/laveurs/:laveurId/toggle-status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "laveurs",
+                ":laveurId",
+                "toggle-status"
+              ],
+              "variable": [
+                {
+                  "key": "laveurId",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Active ou désactive un laveur. Un laveur inactif ne peut plus recevoir de véhicule.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `action` | Oui | `in:activate,deactivate` |\n| `reason` | Non | `string`, `max:255` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"deactivate\",\n  \"reason\": \"Congé\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Statistiques d'un laveur",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/laveurs/:laveurId/stats?date_debut=2026-11-01&date_fin=2026-11-30",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "laveurs",
+                ":laveurId",
+                "stats"
+              ],
+              "variable": [
+                {
+                  "key": "laveurId",
+                  "value": "5"
+                }
+              ],
+              "query": [
+                {
+                  "key": "date_debut",
+                  "value": "2026-11-01",
+                  "disabled": false
+                },
+                {
+                  "key": "date_fin",
+                  "value": "2026-11-30",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Lavages, revenu généré, gain du laveur, durée moyenne, répartition par type et 10 derniers lavages.\n\n**Accès :** manager et laveur (le laveur ne voit que ses propres données).\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date` |"
+          },
+          "response": []
+        },
+        {
+          "name": "Supprimer un laveur",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/laveurs/:laveurId",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "laveurs",
+                ":laveurId"
+              ],
+              "variable": [
+                {
+                  "key": "laveurId",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Suppression d'un laveur (impossible s'il a déjà des attributions).\n\n**Accès :** manager (role = 1) uniquement."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Clients (usagers créés par le lavage)",
+      "description": "Un client créé par un lavage bénéficie des avantages usager (abonnement FREEMIUM, cartes de réduction, parrainage, fidélité) mais n'est **pas compté comme usager réel** (`activated_at = null`) tant qu'il ne s'est pas connecté sur l'app usager.",
+      "item": [
+        {
+          "name": "Créer un client + véhicule / moto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage/register-usager",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage",
+                "register-usager"
+              ]
+            },
+            "description": "Crée le client, son véhicule (voiture ou **moto** via `type_de_vehicule_id`), l'abonnement FREEMIUM, les cartes de réduction et le code parrain de la station. Si `indicatif` et `mobile` sont fournis, les identifiants sont envoyés par SMS. Le numéro est facultatif.\n\n`photos[]` : 0 ou exactement 4 photos.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `immatriculation` | Oui | `string`, `unique:vehicules,matricule` |\n| `indicatif` | Non | `string`, `max:10` |\n| `nom` | Non | `string`, `max:255` |\n| `prenoms` | Non | `string`, `max:255` |\n| `mobile` | Non | `numeric`, `unique:users,mobile` |\n| `is_whatsapp` | Non | `boolean` |\n| `carte_grise` | Non | `string`, `unique:vehicules,carte_grise` |\n| `photos` | Non | `array`, `size:4` |\n| `photos.*` | Non | `file`, `image`, `max:25048` |\n| `type_de_vehicule_id` | Non | `exists:type_de_vehicules,id` |\n| `marque_id` | Non | `exists:marques,id` |\n| `type_de_carburant_id` | Non | `exists:type_de_carburants,id` |\n| `couleur` | Non | `string`, `max:50` |\n| `modele` | Non | `string`, `max:255` |",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "immatriculation",
+                  "value": "1234AB01",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "indicatif",
+                  "value": "225",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "mobile",
+                  "value": "0700000000",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "nom",
+                  "value": "Kouassi",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "prenoms",
+                  "value": "Jean",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "is_whatsapp",
+                  "value": "1",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "carte_grise",
+                  "value": "",
+                  "type": "text",
+                  "disabled": true
+                },
+                {
+                  "key": "type_de_vehicule_id",
+                  "value": "1",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "marque_id",
+                  "value": "1",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "type_de_carburant_id",
+                  "value": "1",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "couleur",
+                  "value": "Bleu",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "modele",
+                  "value": "Corolla",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "photos[]",
+                  "type": "file",
+                  "src": [],
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Créer un client (route alternative)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/usagers/register-usager",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "usagers",
+                "register-usager"
+              ]
+            },
+            "description": "Identique à `stations-lavage/register-usager` (même traitement, même validation).\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `immatriculation` | Oui | `string`, `unique:vehicules,matricule` |\n| `indicatif` | Non | `string`, `max:10` |\n| `nom` | Non | `string`, `max:255` |\n| `prenoms` | Non | `string`, `max:255` |\n| `mobile` | Non | `numeric`, `unique:users,mobile` |\n| `is_whatsapp` | Non | `boolean` |\n| `carte_grise` | Non | `string`, `unique:vehicules,carte_grise` |\n| `photos` | Non | `array`, `size:4` |\n| `photos.*` | Non | `file`, `image`, `max:25048` |\n| `type_de_vehicule_id` | Non | `exists:type_de_vehicules,id` |\n| `marque_id` | Non | `exists:marques,id` |\n| `type_de_carburant_id` | Non | `exists:type_de_carburants,id` |\n| `couleur` | Non | `string`, `max:50` |\n| `modele` | Non | `string`, `max:255` |",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "immatriculation",
+                  "value": "5678CD01",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "indicatif",
+                  "value": "225",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "mobile",
+                  "value": "0500000000",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "nom",
+                  "value": "Traoré",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "prenoms",
+                  "value": "Awa",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "type_de_vehicule_id",
+                  "value": "1",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "marque_id",
+                  "value": "1",
+                  "type": "text",
+                  "disabled": false
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Clients de la station",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stations-lavage/usagers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stations-lavage",
+                "usagers"
+              ]
+            },
+            "description": "Liste des clients rattachés à la station avec leurs véhicules."
+          },
+          "response": []
+        },
+        {
+          "name": "Clients de la station (route alternative)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/usagers/usagers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "usagers",
+                "usagers"
+              ]
+            },
+            "description": "Identique à `stations-lavage/usagers`."
+          },
+          "response": []
+        },
+        {
+          "name": "Rechercher un client",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/usagers/rechercher",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "usagers",
+                "rechercher"
+              ]
+            },
+            "description": "Recherche par téléphone ou par immatriculation.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `telephone` | Non | `string` |\n| `matricule` | Non | `string` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telephone\": \"2250700000000\",\n  \"matricule\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Associer un QR code à un véhicule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/usagers/assign-scan",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "usagers",
+                "assign-scan"
+              ]
+            },
+            "description": "Associe un QR code TOOAUTO (non encore attribué) au véhicule.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `qrcode` | Oui | `string`, `max:255` |\n| `matricule` | Oui | `string`, `max:50` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"qrcode\": \"QR123456\",\n  \"matricule\": \"1234AB01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Historique des QR codes attribués",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/usagers/historique/:station_de_lavage_id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "usagers",
+                "historique",
+                ":station_de_lavage_id"
+              ],
+              "variable": [
+                {
+                  "key": "station_de_lavage_id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Historique des **attributions de QR codes** de la station (ce n'est pas l'historique des lavages : voir `attributions/historique`)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Types de lavage (véhicules et motos)",
+      "description": "Catalogue des prestations de la station pour les véhicules et motos. `montant` = prix client, `montant_laveur` = gain de **chaque** laveur.\n\n⚠️ Modifier un prix change aussi les montants des lavages passés dans l'historique et les statistiques.",
+      "item": [
+        {
+          "name": "Lister les types de lavage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/type-lavage",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "type-lavage"
+              ]
+            },
+            "description": "Types de lavage de la station."
+          },
+          "response": []
+        },
+        {
+          "name": "Créer un type de lavage",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/type-lavage",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "type-lavage"
+              ]
+            },
+            "description": "Création d'une prestation.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `libelle` | Oui | `string`, `max:200`, `unique dans votre station` |\n| `montant` | Oui | `numeric`, `min:0` |\n| `montant_laveur` | Oui | `numeric`, `min:0` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"libelle\": \"Lavage complet berline\",\n  \"montant\": 2000,\n  \"montant_laveur\": 250\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Voir un type de lavage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/type-lavage/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "type-lavage",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Détail d'une prestation."
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier un type de lavage",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/type-lavage/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "type-lavage",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Seuls les champs envoyés sont modifiés.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `libelle` | Non | `string`, `max:200`, `unique dans votre station` |\n| `montant` | Oui | `numeric`, `min:0` |\n| `montant_laveur` | Oui | `numeric`, `min:0` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"montant\": 2500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Supprimer un type de lavage",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/type-lavage/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "type-lavage",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Impossible si le type a déjà été utilisé par un lavage."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Lavages véhicules et motos",
+      "description": "Parcours : **attribuer** (statut `en_cours`) → **terminer** avec le paiement (statut `termine`, ajout automatique d'une case de fidélité).\n\nPaiement : `espece` ou `mobile_money` avec `operateur_paiement` = OM, WAVE, MTN, MOOV ou CB.",
+      "item": [
+        {
+          "name": "Laveurs disponibles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/laveurs-actifs",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "laveurs-actifs"
+              ]
+            },
+            "description": "Laveurs actifs pouvant recevoir un véhicule."
+          },
+          "response": []
+        },
+        {
+          "name": "Attribuer un véhicule / une moto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/attribuer-vehicule",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "attribuer-vehicule"
+              ]
+            },
+            "description": "Démarre un lavage avec un ou plusieurs laveurs (`laveur_ids`, ou `laveur_id` pour un seul). Refusé si le véhicule a déjà un lavage en cours.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `matricule_vehicule` | Oui | `string`, `exists:vehicules,matricule` |\n| `laveur_id` | Conditionnel | `required_without:laveur_ids`, `exists:lavages,id` |\n| `laveur_ids` | Conditionnel | `required_without:laveur_id`, `array`, `min:1` |\n| `laveur_ids.*` | Non | `integer`, `distinct`, `exists:lavages,id` |\n| `type_lavage_id` | Oui | `integer`, `exists:type_lavages,id (type de votre station)` |\n| `notes` | Non | `string`, `max:500` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matricule_vehicule\": \"1234AB01\",\n  \"laveur_ids\": [\n    5,\n    6\n  ],\n  \"type_lavage_id\": 10,\n  \"notes\": \"Client pressé\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Lavages en cours",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/en-cours",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "en-cours"
+              ]
+            },
+            "description": "Lavages en cours de la station avec la durée écoulée.\n\n**Accès :** manager (role = 1) uniquement."
+          },
+          "response": []
+        },
+        {
+          "name": "Terminer un lavage (espèces)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/terminer-lavage/:attributionId",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "terminer-lavage",
+                ":attributionId"
+              ],
+              "variable": [
+                {
+                  "key": "attributionId",
+                  "value": "53"
+                }
+              ]
+            },
+            "description": "Termine le lavage, enregistre le paiement et ajoute une case à la carte de fidélité du véhicule. Si la carte est complète : récompense « lavage gratuit » créée et nouvelle carte démarrée (`fidelite.recompense_attribuee = true`).\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `mode_paiement` | Oui | `in:espece,mobile_money` |\n| `operateur_paiement` | Conditionnel | `required_if:mode_paiement,mobile_money`, `prohibited_unless:mode_paiement,mobile_money`, `in:OM,MTN,MOOV,WAVE,CB` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode_paiement\": \"espece\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Terminer un lavage (mobile money)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/terminer-lavage/:attributionId",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "terminer-lavage",
+                ":attributionId"
+              ],
+              "variable": [
+                {
+                  "key": "attributionId",
+                  "value": "53"
+                }
+              ]
+            },
+            "description": "Même chose avec un paiement mobile money. `operateur_paiement` : OM, WAVE, MTN, MOOV ou CB.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `mode_paiement` | Oui | `in:espece,mobile_money` |\n| `operateur_paiement` | Conditionnel | `required_if:mode_paiement,mobile_money`, `prohibited_unless:mode_paiement,mobile_money`, `in:OM,MTN,MOOV,WAVE,CB` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode_paiement\": \"mobile_money\",\n  \"operateur_paiement\": \"WAVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Véhicules d'un laveur",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/laveur/:laveurId/vehicules?statut=tous",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "laveur",
+                ":laveurId",
+                "vehicules"
+              ],
+              "variable": [
+                {
+                  "key": "laveurId",
+                  "value": "5"
+                }
+              ],
+              "query": [
+                {
+                  "key": "statut",
+                  "value": "tous",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Lavages d'un laveur. `statut` : en_cours (défaut), termine, annule ou tous.\n\n**Accès :** manager et laveur (le laveur ne voit que ses propres données).\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `statut` | Non | `string`, `in:en_cours,termine,annule,tous` |"
+          },
+          "response": []
+        },
+        {
+          "name": "Historique complet des lavages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/historique?date_debut=2026-11-01&date_fin=2026-11-30&statut=tous&per_page=20&page=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "historique"
+              ],
+              "query": [
+                {
+                  "key": "date_debut",
+                  "value": "2026-11-01",
+                  "disabled": false
+                },
+                {
+                  "key": "date_fin",
+                  "value": "2026-11-30",
+                  "disabled": false
+                },
+                {
+                  "key": "statut",
+                  "value": "tous",
+                  "disabled": false
+                },
+                {
+                  "key": "laveur_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "type_lavage_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "matricule",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "mode_paiement",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "operateur_paiement",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "20",
+                  "disabled": false
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Historique paginé avec **toutes les infos** : dates et durée, type de lavage et montant, paiement (mode, opérateur), véhicule (marque, modèle, couleur, type, carburant, photos), propriétaire, laveurs, manager, station, fidélité (case, carte, récompense débloquée). Contient aussi des `totaux` (montant encaissé, espèces, mobile money).\n\n**Accès :** manager et laveur (le laveur ne voit que ses propres données).\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date`, `after_or_equal:date_debut` |\n| `statut` | Non | `string`, `in:en_cours,termine,annule,tous` |\n| `laveur_id` | Non | `integer` |\n| `type_lavage_id` | Non | `integer` |\n| `matricule` | Non | `string`, `max:50` |\n| `mode_paiement` | Non | `string`, `in:espece,mobile_money` |\n| `operateur_paiement` | Non | `string`, `in:OM,MTN,MOOV,WAVE,CB` |\n| `per_page` | Non | `integer`, `min:1`, `max:100` |\n| `page` | Non | `integer`, `min:1` |"
+          },
+          "response": []
+        },
+        {
+          "name": "Statistiques de la station",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/attributions/stats-station?date_debut=2026-11-01&date_fin=2026-11-30",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "attributions",
+                "stats-station"
+              ],
+              "query": [
+                {
+                  "key": "date_debut",
+                  "value": "2026-11-01",
+                  "disabled": false
+                },
+                {
+                  "key": "date_fin",
+                  "value": "2026-11-30",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Totaux, revenus réalisés/potentiels, gains laveurs, durée moyenne, répartition par période, par type de lavage, **par moyen de paiement et opérateur**, par laveur, et 10 derniers lavages.\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date` |"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Carte de fidélité (véhicules et motos)",
+      "description": "Une carte par véhicule (immatriculation) et par station. Chaque lavage terminé remplit une case ; carte pleine = récompense « lavage gratuit ».",
+      "item": [
+        {
+          "name": "Configuration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/configuration",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "configuration"
+              ]
+            },
+            "description": "Nombre de lavages requis pour une récompense."
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier la configuration",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/configuration",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "configuration"
+              ]
+            },
+            "description": "Nombre de cases d'une carte (10 par défaut). S'applique aux nouvelles cartes.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `nombre_lavages_requis` | Oui | `integer`, `min:1`, `max:100` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre_lavages_requis\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Vérifier une immatriculation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/verifier-immatriculation",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "verifier-immatriculation"
+              ]
+            },
+            "description": "Vérifie si un véhicule est connu et renvoie son client, sa carte, ses récompenses et son historique dans la station.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `matricule` | Conditionnel | `required_without:immatriculation`, `string`, `max:50` |\n| `immatriculation` | Conditionnel | `required_without:matricule`, `string`, `max:50` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matricule\": \"1234AB01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ajouter une case manuellement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/add-case",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "add-case"
+              ]
+            },
+            "description": "Ajoute un passage (scan du QR code ou saisie de l'immatriculation dans `qrcode`). ⚠️ À ne pas utiliser après `terminer-lavage` : la case y est déjà ajoutée automatiquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `qrcode` | Oui | `string`, `max:20` |\n| `attribution_id` | Non | `integer`, `exists:attribution_vehicules,id` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"qrcode\": \"1234AB01\",\n  \"attribution_id\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Carte d'un usager",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/carte/:usager_id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "carte",
+                ":usager_id"
+              ],
+              "variable": [
+                {
+                  "key": "usager_id",
+                  "value": "218"
+                }
+              ]
+            },
+            "description": "Cartes de fidélité d'un usager."
+          },
+          "response": []
+        },
+        {
+          "name": "Carte d'un usager pour un véhicule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/carte/:usager_id/:matricule_vehicule",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "carte",
+                ":usager_id",
+                ":matricule_vehicule"
+              ],
+              "variable": [
+                {
+                  "key": "usager_id",
+                  "value": "218"
+                },
+                {
+                  "key": "matricule_vehicule",
+                  "value": "1234AB01"
+                }
+              ]
+            },
+            "description": "Carte de fidélité d'un véhicule précis."
+          },
+          "response": []
+        },
+        {
+          "name": "Récompenses d'un usager",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/recompenses/:usager_id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "recompenses",
+                ":usager_id"
+              ],
+              "variable": [
+                {
+                  "key": "usager_id",
+                  "value": "218"
+                }
+              ]
+            },
+            "description": "Récompenses d'un usager."
+          },
+          "response": []
+        },
+        {
+          "name": "Récompenses d'un usager pour un véhicule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/recompenses/:usager_id/:matricule_vehicule",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "recompenses",
+                ":usager_id",
+                ":matricule_vehicule"
+              ],
+              "variable": [
+                {
+                  "key": "usager_id",
+                  "value": "218"
+                },
+                {
+                  "key": "matricule_vehicule",
+                  "value": "1234AB01"
+                }
+              ]
+            },
+            "description": "Récompenses liées à un véhicule."
+          },
+          "response": []
+        },
+        {
+          "name": "Usagers fidèles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/usagers-fideles",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "usagers-fideles"
+              ]
+            },
+            "description": "Classement des clients les plus fidèles."
+          },
+          "response": []
+        },
+        {
+          "name": "Statistiques fidélité",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carte-fidelite/statistiques",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carte-fidelite",
+                "statistiques"
+              ]
+            },
+            "description": "Statistiques des cartes et récompenses de la station."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Récompenses",
+      "description": "Récompenses obtenues par les clients (lavage gratuit, réductions, cadeaux...).",
+      "item": [
+        {
+          "name": "Récompenses par usager",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/recompenses/usager/:usager_id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recompenses",
+                "usager",
+                ":usager_id"
+              ],
+              "variable": [
+                {
+                  "key": "usager_id",
+                  "value": "218"
+                }
+              ]
+            },
+            "description": "Récompenses d'un usager."
+          },
+          "response": []
+        },
+        {
+          "name": "Récompenses par téléphone",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/recompenses/telephone/:telephone",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recompenses",
+                "telephone",
+                ":telephone"
+              ],
+              "variable": [
+                {
+                  "key": "telephone",
+                  "value": "2250700000000"
+                }
+              ]
+            },
+            "description": "Récompenses d'un client à partir de son numéro (indicatif + numéro)."
+          },
+          "response": []
+        },
+        {
+          "name": "Récompenses par immatriculation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/recompenses/matricule/:matricule",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recompenses",
+                "matricule",
+                ":matricule"
+              ],
+              "variable": [
+                {
+                  "key": "matricule",
+                  "value": "1234AB01"
+                }
+              ]
+            },
+            "description": "Récompenses liées à un véhicule."
+          },
+          "response": []
+        },
+        {
+          "name": "Utiliser une récompense",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/recompenses/utiliser/:recompense_id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recompenses",
+                "utiliser",
+                ":recompense_id"
+              ],
+              "variable": [
+                {
+                  "key": "recompense_id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Marque la récompense comme utilisée (ex. lavage gratuit consommé)."
+          },
+          "response": []
+        },
+        {
+          "name": "Attribuer une récompense manuellement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/recompenses/attribuer",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recompenses",
+                "attribuer"
+              ]
+            },
+            "description": "Geste commercial : attribue une récompense hors carte de fidélité.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `usager_id` | Oui | `exists:users,id` |\n| `matricule_vehicule` | Oui | `string` |\n| `type_recompense` | Oui | `in:lavage_gratuit,reduction_50,reduction_25,bonus_points,service_premium,cadeau` |\n| `description` | Non | `string`, `max:255` |\n| `valeur` | Non | `numeric`, `min:0` |\n| `forcer_attribution` | Non | `boolean` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usager_id\": 218,\n  \"matricule_vehicule\": \"1234AB01\",\n  \"type_recompense\": \"lavage_gratuit\",\n  \"description\": \"Geste commercial\",\n  \"valeur\": 0,\n  \"forcer_attribution\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Types de récompenses",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/recompenses/types",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recompenses",
+                "types"
+              ]
+            },
+            "description": "Liste des types de récompenses disponibles."
+          },
+          "response": []
+        },
+        {
+          "name": "Statistiques par type de récompense",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/recompenses/statistiques-types",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recompenses",
+                "statistiques-types"
+              ]
+            },
+            "description": "Répartition des récompenses par type."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9. Articles sans plaque (tapis, moquette, bâche...)",
+      "description": "Circuit séparé des véhicules, **sans fidélité** : dépôt → lavage → retrait (comme un pressing).\n\nStatuts : `recu` → `en_cours` → `pret` → `livre` (ou `annule` avant le retrait).\n\nPaiement : avance facultative au dépôt, solde au retrait. `espece` ou `mobile_money` avec `operateur_paiement` = OM, WAVE, MTN, MOOV ou CB. Le prix est figé sur chaque ligne au moment du dépôt.",
+      "item": [
+        {
+          "name": "Catalogue des articles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/types?actifs=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "types"
+              ],
+              "query": [
+                {
+                  "key": "actifs",
+                  "value": "1",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Articles de la station. `actifs=1` pour ne garder que les articles actifs.\n\n**Accès :** manager et laveur (le laveur ne voit que ses propres données)."
+          },
+          "response": []
+        },
+        {
+          "name": "Créer un article (à la pièce)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/types",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "types"
+              ]
+            },
+            "description": "Ajout d'un article au catalogue. `unite` : piece ou m2.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `libelle` | Oui | `string`, `max:200`, `unique dans votre station` |\n| `prix` | Oui | `numeric`, `min:0` |\n| `montant_laveur` | Non | `numeric`, `min:0` |\n| `unite` | Non | `in:piece,m2` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"libelle\": \"Grand tapis\",\n  \"prix\": 3000,\n  \"montant_laveur\": 500,\n  \"unite\": \"piece\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Créer un article (au m²)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/types",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "types"
+              ]
+            },
+            "description": "Article facturé au mètre carré.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `libelle` | Oui | `string`, `max:200`, `unique dans votre station` |\n| `prix` | Oui | `numeric`, `min:0` |\n| `montant_laveur` | Non | `numeric`, `min:0` |\n| `unite` | Non | `in:piece,m2` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"libelle\": \"Moquette\",\n  \"prix\": 1500,\n  \"montant_laveur\": 300,\n  \"unite\": \"m2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier un article",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/types/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "types",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Seuls les champs envoyés sont modifiés. Les dépôts existants gardent leur prix. `statut: false` pour désactiver.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `libelle` | Non | `string`, `max:200`, `unique dans votre station` |\n| `prix` | Oui | `numeric`, `min:0` |\n| `montant_laveur` | Oui | `numeric`, `min:0` |\n| `unite` | Oui | `in:piece,m2` |\n| `statut` | Oui | `boolean` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prix\": 3500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Supprimer un article",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/types/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "types",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Impossible si l'article est déjà utilisé : désactivez-le plutôt.\n\n**Accès :** manager (role = 1) uniquement."
+          },
+          "response": []
+        },
+        {
+          "name": "Créer un dépôt (avance mobile money)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots"
+              ]
+            },
+            "description": "Enregistre le dépôt et génère le **ticket** (`DEP-000001`). Le client est facultatif (`user_id` s'il a un compte, sinon `client_nom` / `client_mobile`). Montant total calculé automatiquement (prix × quantité).\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `user_id` | Non | `integer`, `exists:users,id` |\n| `client_nom` | Non | `string`, `max:255` |\n| `client_mobile` | Non | `string`, `max:20` |\n| `lignes` | Oui | `array`, `min:1` |\n| `lignes.*.type_article_id` | Oui | `integer`, `exists:type_articles,id (article actif de votre station)` |\n| `lignes.*.quantite` | Non | `numeric`, `min:0.01` |\n| `lignes.*.description` | Non | `string`, `max:255` |\n| `laveur_ids` | Non | `array` |\n| `laveur_ids.*` | Non | `integer`, `distinct` |\n| `date_retrait_prevue` | Non | `date` |\n| `notes` | Non | `string`, `max:1000` |\n| `avance` | Non | `array` |\n| `avance.montant` | Conditionnel | `required_with:avance`, `numeric`, `min:1` |\n| `avance.mode_paiement` | Conditionnel | `required_with:avance`, `in:espece,mobile_money` |\n| `avance.operateur_paiement` | Conditionnel | `required_if:avance.mode_paiement,mobile_money`, `prohibited_unless:avance.mode_paiement,mobile_money`, `in:OM,WAVE,MTN,MOOV,CB` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_nom\": \"Awa Traoré\",\n  \"client_mobile\": \"0700000000\",\n  \"lignes\": [\n    {\n      \"type_article_id\": 1,\n      \"quantite\": 2,\n      \"description\": \"Tapis salon beige\"\n    },\n    {\n      \"type_article_id\": 2,\n      \"quantite\": 12.5,\n      \"description\": \"Moquette chambre\"\n    }\n  ],\n  \"laveur_ids\": [\n    5\n  ],\n  \"date_retrait_prevue\": \"2026-11-06 17:00:00\",\n  \"avance\": {\n    \"montant\": 5000,\n    \"mode_paiement\": \"mobile_money\",\n    \"operateur_paiement\": \"WAVE\"\n  },\n  \"notes\": \"Tache de café sur le grand tapis\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Créer un dépôt (avance espèces)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots"
+              ]
+            },
+            "description": "Avance en espèces : pas d'`operateur_paiement`.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `user_id` | Non | `integer`, `exists:users,id` |\n| `client_nom` | Non | `string`, `max:255` |\n| `client_mobile` | Non | `string`, `max:20` |\n| `lignes` | Oui | `array`, `min:1` |\n| `lignes.*.type_article_id` | Oui | `integer`, `exists:type_articles,id (article actif de votre station)` |\n| `lignes.*.quantite` | Non | `numeric`, `min:0.01` |\n| `lignes.*.description` | Non | `string`, `max:255` |\n| `laveur_ids` | Non | `array` |\n| `laveur_ids.*` | Non | `integer`, `distinct` |\n| `date_retrait_prevue` | Non | `date` |\n| `notes` | Non | `string`, `max:1000` |\n| `avance` | Non | `array` |\n| `avance.montant` | Conditionnel | `required_with:avance`, `numeric`, `min:1` |\n| `avance.mode_paiement` | Conditionnel | `required_with:avance`, `in:espece,mobile_money` |\n| `avance.operateur_paiement` | Conditionnel | `required_if:avance.mode_paiement,mobile_money`, `prohibited_unless:avance.mode_paiement,mobile_money`, `in:OM,WAVE,MTN,MOOV,CB` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_nom\": \"Awa Traoré\",\n  \"lignes\": [\n    {\n      \"type_article_id\": 1,\n      \"quantite\": 1\n    }\n  ],\n  \"avance\": {\n    \"montant\": 1000,\n    \"mode_paiement\": \"espece\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Créer un dépôt (sans avance)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots"
+              ]
+            },
+            "description": "Tout sera payé au retrait.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `user_id` | Non | `integer`, `exists:users,id` |\n| `client_nom` | Non | `string`, `max:255` |\n| `client_mobile` | Non | `string`, `max:20` |\n| `lignes` | Oui | `array`, `min:1` |\n| `lignes.*.type_article_id` | Oui | `integer`, `exists:type_articles,id (article actif de votre station)` |\n| `lignes.*.quantite` | Non | `numeric`, `min:0.01` |\n| `lignes.*.description` | Non | `string`, `max:255` |\n| `laveur_ids` | Non | `array` |\n| `laveur_ids.*` | Non | `integer`, `distinct` |\n| `date_retrait_prevue` | Non | `date` |\n| `notes` | Non | `string`, `max:1000` |\n| `avance` | Non | `array` |\n| `avance.montant` | Conditionnel | `required_with:avance`, `numeric`, `min:1` |\n| `avance.mode_paiement` | Conditionnel | `required_with:avance`, `in:espece,mobile_money` |\n| `avance.operateur_paiement` | Conditionnel | `required_if:avance.mode_paiement,mobile_money`, `prohibited_unless:avance.mode_paiement,mobile_money`, `in:OM,WAVE,MTN,MOOV,CB` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": 218,\n  \"lignes\": [\n    {\n      \"type_article_id\": 1,\n      \"quantite\": 1,\n      \"description\": \"Bâche camion\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Passer en cours",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots/:id/statut",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots",
+                ":id",
+                "statut"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Change le statut. On peut affecter ou remplacer les laveurs à ce moment.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `statut` | Oui | `in:en_cours,pret,annule` |\n| `laveur_ids` | Non | `array` |\n| `laveur_ids.*` | Non | `integer`, `distinct` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"statut\": \"en_cours\",\n  \"laveur_ids\": [\n    5,\n    6\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Marquer prêt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots/:id/statut",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots",
+                ":id",
+                "statut"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Articles prêts à être récupérés.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `statut` | Oui | `in:en_cours,pret,annule` |\n| `laveur_ids` | Non | `array` |\n| `laveur_ids.*` | Non | `integer`, `distinct` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"statut\": \"pret\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Annuler un dépôt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots/:id/statut",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots",
+                ":id",
+                "statut"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Annulation avant le retrait.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `statut` | Oui | `in:en_cours,pret,annule` |\n| `laveur_ids` | Non | `array` |\n| `laveur_ids.*` | Non | `integer`, `distinct` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"statut\": \"annule\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remettre au client (espèces)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots/:id/livrer",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots",
+                ":id",
+                "livrer"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Encaisse le reste à payer et passe le dépôt en `livre`. Le moyen de paiement n'est obligatoire que s'il reste à payer.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `mode_paiement` | Conditionnel | `required s'il reste à payer`, `in:espece,mobile_money` |\n| `operateur_paiement` | Conditionnel | `required_if:mode_paiement,mobile_money`, `prohibited_unless:mode_paiement,mobile_money`, `in:OM,WAVE,MTN,MOOV,CB` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode_paiement\": \"espece\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remettre au client (mobile money)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots/:id/livrer",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots",
+                ":id",
+                "livrer"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Solde en mobile money : OM, WAVE, MTN, MOOV ou CB.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `mode_paiement` | Conditionnel | `required s'il reste à payer`, `in:espece,mobile_money` |\n| `operateur_paiement` | Conditionnel | `required_if:mode_paiement,mobile_money`, `prohibited_unless:mode_paiement,mobile_money`, `in:OM,WAVE,MTN,MOOV,CB` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode_paiement\": \"mobile_money\",\n  \"operateur_paiement\": \"OM\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remettre au client (déjà payé)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots/:id/livrer",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots",
+                ":id",
+                "livrer"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Si l'avance couvre tout, aucun paiement à envoyer.\n\n**Accès :** manager (role = 1) uniquement.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `mode_paiement` | Conditionnel | `required s'il reste à payer`, `in:espece,mobile_money` |\n| `operateur_paiement` | Conditionnel | `required_if:mode_paiement,mobile_money`, `prohibited_unless:mode_paiement,mobile_money`, `in:OM,WAVE,MTN,MOOV,CB` |"
+          },
+          "response": []
+        },
+        {
+          "name": "Historique des dépôts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots?date_debut=2026-11-01&date_fin=2026-11-30&statut=tous&per_page=20&page=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots"
+              ],
+              "query": [
+                {
+                  "key": "date_debut",
+                  "value": "2026-11-01",
+                  "disabled": false
+                },
+                {
+                  "key": "date_fin",
+                  "value": "2026-11-30",
+                  "disabled": false
+                },
+                {
+                  "key": "statut",
+                  "value": "tous",
+                  "disabled": false
+                },
+                {
+                  "key": "statut_paiement",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "mode_paiement",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "operateur_paiement",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "type_article_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "laveur_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "client",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "numero_ticket",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "20",
+                  "disabled": false
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Historique paginé avec `totaux` (facturé, encaissé, reste à encaisser — hors annulés). `client` : recherche dans le nom ou le numéro. `mode_paiement` / `operateur_paiement` : dépôts ayant au moins un paiement (avance ou solde) correspondant.\n\n**Accès :** manager et laveur (le laveur ne voit que ses propres données).\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `statut` | Non | `in:recu,en_cours,pret,livre,annule,tous` |\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date`, `after_or_equal:date_debut` |\n| `numero_ticket` | Non | `string`, `max:30` |\n| `client` | Non | `string`, `max:255` |\n| `laveur_id` | Non | `integer` |\n| `type_article_id` | Non | `integer` |\n| `mode_paiement` | Non | `in:espece,mobile_money` |\n| `operateur_paiement` | Non | `in:OM,WAVE,MTN,MOOV,CB` |\n| `statut_paiement` | Non | `in:non_paye,partiel,paye` |\n| `per_page` | Non | `integer`, `min:1`, `max:100` |\n| `page` | Non | `integer`, `min:1` |"
+          },
+          "response": []
+        },
+        {
+          "name": "Détail d'un dépôt",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/depots/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "depots",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Ticket complet : client, lignes, paiements (avance / solde), laveurs, dates.\n\n**Accès :** manager et laveur (le laveur ne voit que ses propres données)."
+          },
+          "response": []
+        },
+        {
+          "name": "Statistiques des articles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/articles/stats?date_debut=2026-11-01&date_fin=2026-11-30",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "articles",
+                "stats"
+              ],
+              "query": [
+                {
+                  "key": "date_debut",
+                  "value": "2026-11-01",
+                  "disabled": false
+                },
+                {
+                  "key": "date_fin",
+                  "value": "2026-11-30",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Dépôts par statut, articles traités, facturé, encaissé sur la période, reste à encaisser, gains laveurs, répartition par article et par moyen de paiement / opérateur.\n\n**Accès :** manager et laveur (le laveur ne voit que ses propres données).\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date`, `after_or_equal:date_debut` |"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10. Cartes de réduction",
+      "description": "Application des cartes de réduction des usagers (liées à leur abonnement).",
+      "item": [
+        {
+          "name": "Vérifier une carte",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-cards/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-cards",
+                "verify"
+              ]
+            },
+            "description": "Vérifie une carte par son code ou son QR code.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `card_code` | Conditionnel | `required_without:qr_code`, `string`, `max:50` |\n| `qr_code` | Conditionnel | `required_without:card_code`, `string`, `max:100` |\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"card_code\": \"CARD-XXXX\",\n  \"qr_code\": null,\n  \"establishment_type\": \"lavage\",\n  \"establishment_id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Appliquer une carte",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-cards/apply",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-cards",
+                "apply"
+              ]
+            },
+            "description": "Applique la réduction sur un montant.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `card_code` | Conditionnel | `required_without:qr_code`, `string`, `max:50` |\n| `qr_code` | Conditionnel | `required_without:card_code`, `string`, `max:100` |\n| `montant_initial` | Oui | `numeric`, `min:0` |\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |\n| `applied_by_id` | Oui | `integer`, `min:1` |\n| `notes` | Non | `string` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"card_code\": \"CARD-XXXX\",\n  \"qr_code\": null,\n  \"montant_initial\": 2000,\n  \"establishment_type\": \"lavage\",\n  \"establishment_id\": 1,\n  \"applied_by_id\": 3,\n  \"notes\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Historique des cartes appliquées",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-cards/histories?establishment_type=lavage&establishment_id=1&per_page=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-cards",
+                "histories"
+              ],
+              "query": [
+                {
+                  "key": "establishment_type",
+                  "value": "lavage",
+                  "disabled": false
+                },
+                {
+                  "key": "establishment_id",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "date_debut",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "date_fin",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Historique paginé des réductions appliquées.\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date`, `after_or_equal:date_debut` |\n| `user_id` | Non | `integer`, `min:1` |\n| `usager` | Non | `string`, `max:150` |\n| `reduction_card_id` | Non | `integer`, `min:1` |\n| `type_carte` | Non | `string`, `max:150` |\n| `montant` | Non | `numeric`, `min:0` |\n| `montant_min` | Non | `numeric`, `min:0` |\n| `montant_max` | Non | `numeric`, `min:0` |\n| `per_page` | Non | `integer`, `min:1`, `max:100` |"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "11. Campagnes de réduction",
+      "description": "Campagnes promotionnelles de la station (pour un lavage, `product_or_service` contient des ids de types de lavage).",
+      "item": [
+        {
+          "name": "Lister les campagnes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns?establishment_type=lavage&establishment_id=1&per_page=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns"
+              ],
+              "query": [
+                {
+                  "key": "establishment_type",
+                  "value": "lavage",
+                  "disabled": false
+                },
+                {
+                  "key": "establishment_id",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "statut",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Campagnes de l'établissement.\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |\n| `statut` | Non | `integer`, `in:0,1` |\n| `per_page` | Non | `integer`, `min:1`, `max:100` |"
+          },
+          "response": []
+        },
+        {
+          "name": "Campagnes actives",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns/active?establishment_type=lavage&establishment_id=1&per_page=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns",
+                "active"
+              ],
+              "query": [
+                {
+                  "key": "establishment_type",
+                  "value": "lavage",
+                  "disabled": false
+                },
+                {
+                  "key": "establishment_id",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "per_page",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Campagnes en cours de validité.\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |\n| `per_page` | Non | `integer`, `min:1`, `max:100` |"
+          },
+          "response": []
+        },
+        {
+          "name": "Créer une campagne",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns"
+              ]
+            },
+            "description": "Création d'une campagne (multipart si image).\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |\n| `name` | Oui | `string`, `max:255` |\n| `image` | Non | `image (multipart)` |\n| `description` | Non | `string` |\n| `product_or_service` | Oui | `string ou tableau (pour un lavage : ids de types de lavage)` |\n| `discount_type` | Oui | `in:percentage,fixed,montant` |\n| `discount_value` | Oui | `numeric`, `min:0` |\n| `normal_price` | Oui | `numeric`, `min:0` |\n| `promotional_price` | Non | `numeric`, `min:0` |\n| `date_debut` | Oui | `date` |\n| `date_fin` | Oui | `date`, `after_or_equal:date_debut` |\n| `quantity_available` | Non | `integer`, `min:1` |\n| `conditions` | Non | `string` |\n| `statut` | Non | `integer`, `in:0,1` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"establishment_type\": \"lavage\",\n  \"establishment_id\": 1,\n  \"name\": \"Promo fin d'année\",\n  \"description\": \"-20% sur le lavage complet\",\n  \"product_or_service\": [\n    10\n  ],\n  \"discount_type\": \"percentage\",\n  \"discount_value\": 20,\n  \"normal_price\": 2000,\n  \"promotional_price\": 1600,\n  \"date_debut\": \"2026-12-01\",\n  \"date_fin\": \"2026-12-31\",\n  \"quantity_available\": 100,\n  \"conditions\": null,\n  \"statut\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Voir une campagne",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns/:reductionCampaign",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns",
+                ":reductionCampaign"
+              ],
+              "variable": [
+                {
+                  "key": "reductionCampaign",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Détail d'une campagne."
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier une campagne",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns/:reductionCampaign",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns",
+                ":reductionCampaign"
+              ],
+              "variable": [
+                {
+                  "key": "reductionCampaign",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Seuls les champs envoyés sont modifiés. Utilisez `POST` sur la même URL pour envoyer une image en multipart.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `establishment_type` | Non | `in:etablissement,lavage,station` |\n| `establishment_id` | Non | `integer`, `min:1` |\n| `name` | Non | `string`, `max:255` |\n| `image` | Non | `image (multipart)` |\n| `description` | Non | `string` |\n| `product_or_service` | Non | `string ou tableau (pour un lavage : ids de types de lavage)` |\n| `discount_type` | Non | `in:percentage,fixed,montant` |\n| `discount_value` | Non | `numeric`, `min:0` |\n| `normal_price` | Non | `numeric`, `min:0` |\n| `promotional_price` | Non | `numeric`, `min:0` |\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date`, `after_or_equal:date_debut` |\n| `quantity_available` | Non | `integer`, `min:1` |\n| `conditions` | Non | `string` |\n| `statut` | Non | `integer`, `in:0,1` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"discount_value\": 25,\n  \"statut\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Modifier une campagne (avec image)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns/:reductionCampaign",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns",
+                ":reductionCampaign"
+              ],
+              "variable": [
+                {
+                  "key": "reductionCampaign",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Même chose que le PUT, en multipart pour pouvoir envoyer une nouvelle image.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `establishment_type` | Non | `in:etablissement,lavage,station` |\n| `establishment_id` | Non | `integer`, `min:1` |\n| `name` | Non | `string`, `max:255` |\n| `image` | Non | `image (multipart)` |\n| `description` | Non | `string` |\n| `product_or_service` | Non | `string ou tableau (pour un lavage : ids de types de lavage)` |\n| `discount_type` | Non | `in:percentage,fixed,montant` |\n| `discount_value` | Non | `numeric`, `min:0` |\n| `normal_price` | Non | `numeric`, `min:0` |\n| `promotional_price` | Non | `numeric`, `min:0` |\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date`, `after_or_equal:date_debut` |\n| `quantity_available` | Non | `integer`, `min:1` |\n| `conditions` | Non | `string` |\n| `statut` | Non | `integer`, `in:0,1` |",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "Promo fin d'année",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "discount_value",
+                  "value": "25",
+                  "type": "text",
+                  "disabled": false
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": [],
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Supprimer une campagne",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns/:reductionCampaign",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns",
+                ":reductionCampaign"
+              ],
+              "variable": [
+                {
+                  "key": "reductionCampaign",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Suppression d'une campagne."
+          },
+          "response": []
+        },
+        {
+          "name": "Vérifier la carte d'un client",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns/verify-card",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns",
+                "verify-card"
+              ]
+            },
+            "description": "Vérifie la carte du client et la campagne active applicable.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `card_code` | Conditionnel | `required_without:qr_code`, `string`, `max:50` |\n| `qr_code` | Conditionnel | `required_without:card_code`, `string`, `max:100` |\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"card_code\": \"CARD-XXXX\",\n  \"qr_code\": null,\n  \"establishment_type\": \"lavage\",\n  \"establishment_id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Appliquer une campagne",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns/apply",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns",
+                "apply"
+              ]
+            },
+            "description": "Applique la campagne active au client.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `card_code` | Conditionnel | `required_without:qr_code`, `string`, `max:50` |\n| `qr_code` | Conditionnel | `required_without:card_code`, `string`, `max:100` |\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |\n| `applied_by_id` | Oui | `integer`, `min:1` |\n| `notes` | Non | `string` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"card_code\": \"CARD-XXXX\",\n  \"qr_code\": null,\n  \"establishment_type\": \"lavage\",\n  \"establishment_id\": 1,\n  \"applied_by_id\": 3,\n  \"notes\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Utilisations des campagnes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reduction-campaigns/usages?establishment_type=lavage&establishment_id=1&per_page=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reduction-campaigns",
+                "usages"
+              ],
+              "query": [
+                {
+                  "key": "establishment_type",
+                  "value": "lavage",
+                  "disabled": false
+                },
+                {
+                  "key": "establishment_id",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "date_debut",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "date_fin",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Historique paginé des campagnes appliquées.\n\n### Paramètres (query)\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `establishment_type` | Oui | `in:etablissement,lavage,station` |\n| `establishment_id` | Oui | `integer`, `min:1` |\n| `date_debut` | Non | `date` |\n| `date_fin` | Non | `date`, `after_or_equal:date_debut` |\n| `user_id` | Non | `integer`, `min:1` |\n| `usager` | Non | `string`, `max:150` |\n| `campaign_id` | Non | `integer`, `min:1` |\n| `campaign` | Non | `string`, `max:150` |\n| `montant` | Non | `numeric`, `min:0` |\n| `montant_min` | Non | `numeric`, `min:0` |\n| `montant_max` | Non | `numeric`, `min:0` |\n| `per_page` | Non | `integer`, `min:1`, `max:100` |"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "12. Notifications",
+      "description": "Tokens FCM du compte connecté pour les notifications push.",
+      "item": [
+        {
+          "name": "Mes tokens FCM",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/notifications/fcm-tokens",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "fcm-tokens"
+              ]
+            },
+            "description": "Tokens enregistrés pour le compte connecté."
+          },
+          "response": []
+        },
+        {
+          "name": "Enregistrer un token FCM",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/notifications/fcm-tokens",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "fcm-tokens"
+              ]
+            },
+            "description": "Enregistre le token de l'appareil.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `token` | Oui | `string`, `max:255` |\n| `platform` | Non | `in:android,ios,web` |\n| `device_id` | Non | `string`, `max:255` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"fcm-token-xxxx\",\n  \"platform\": \"android\",\n  \"device_id\": \"device-123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Supprimer un token FCM",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/notifications/fcm-tokens",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "fcm-tokens"
+              ]
+            },
+            "description": "Supprime le token (à la déconnexion).\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `token` | Oui | `string`, `max:255` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"fcm-token-xxxx\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "13. Ancien système de fidélité (déprécié)",
+      "description": "⚠️ Conservé pour compatibilité. Utilisez le dossier **Carte de fidélité**.",
+      "item": [
+        {
+          "name": "Ajouter des points",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/fidelite/add-points",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "fidelite",
+                "add-points"
+              ]
+            },
+            "description": "Alias de `carte-fidelite/add-case`.\n\n### Champs\n| Champ | Obligatoire | Règles |\n|---|---|---|\n| `qrcode` | Oui | `string`, `max:20` |\n| `attribution_id` | Non | `integer`, `exists:attribution_vehicules,id` |",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"qrcode\": \"1234AB01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Points d'un usager",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/fidelite/points/:usager_id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "fidelite",
+                "points",
+                ":usager_id"
+              ],
+              "variable": [
+                {
+                  "key": "usager_id",
+                  "value": "218"
+                }
+              ]
+            },
+            "description": "Points d'un usager."
+          },
+          "response": []
+        },
+        {
+          "name": "Usagers fidèles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/fidelite/usagers-fideles",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "fidelite",
+                "usagers-fideles"
+              ]
+            },
+            "description": "Alias de `carte-fidelite/usagers-fideles`."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

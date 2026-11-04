@@ -10,6 +10,7 @@ use App\Http\Controllers\API\UsagerController;
 use App\Http\Controllers\API\ReductionCardController;
 use App\Http\Controllers\API\ReductionCampaignController;
 use App\Http\Controllers\API\FcmTokenController;
+use App\Http\Controllers\API\ArticleController;
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -142,4 +143,20 @@ Route::prefix('attributions')->middleware('auth:api')->group(function () {
     Route::get('/type-lavage/{id}', [StationLavageController::class, 'showTypeLavage'])->whereNumber('id');
     Route::put('/type-lavage/{id}', [StationLavageController::class, 'updateTypeLavage'])->whereNumber('id');
     Route::delete('/type-lavage/{id}', [StationLavageController::class, 'destroyTypeLavage'])->whereNumber('id');
+});
+
+// Routes pour le dépôt d'articles sans plaque (tapis, moquette, bâche...) - sans fidélité
+Route::prefix('articles')->middleware('auth:api')->group(function () {
+    Route::get('/types', [ArticleController::class, 'indexTypes']);
+    Route::post('/types', [ArticleController::class, 'storeType']);
+    Route::put('/types/{id}', [ArticleController::class, 'updateType'])->whereNumber('id');
+    Route::delete('/types/{id}', [ArticleController::class, 'destroyType'])->whereNumber('id');
+
+    Route::get('/depots', [ArticleController::class, 'indexDepots']);
+    Route::post('/depots', [ArticleController::class, 'storeDepot']);
+    Route::get('/depots/{id}', [ArticleController::class, 'showDepot'])->whereNumber('id');
+    Route::post('/depots/{id}/statut', [ArticleController::class, 'updateStatut'])->whereNumber('id');
+    Route::post('/depots/{id}/livrer', [ArticleController::class, 'livrer'])->whereNumber('id');
+
+    Route::get('/stats', [ArticleController::class, 'stats']);
 });
